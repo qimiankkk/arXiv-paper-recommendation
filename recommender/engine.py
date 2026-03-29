@@ -9,6 +9,8 @@ from __future__ import annotations
 import numpy as np
 
 from pipeline.index import PaperIndex
+from recommender.retrieve import find_nearest_clusters, knn_in_clusters
+from recommender.rerank import rerank_and_select
 
 
 def recommend(
@@ -34,13 +36,27 @@ def recommend(
         List of up to n paper_meta dicts, each with an added "rec_score" key.
         May return fewer than n if the user has seen most papers or the
         index is small.
-
-    Implementation:
-        - clusters = find_nearest_clusters(user_emb, index.centroids, n=2)
-        - candidates = knn_in_clusters(user_emb, clusters, index, seen_ids, k=40)
-        - results = rerank_and_select(candidates, n=n)
-        - Edge case: if len(results) < n, fall back to searching across ALL
-          clusters (not just top-2) to find additional unseen papers.
-        - Return results.
     """
-    raise NotImplementedError
+    # 1. Find nearest clusters
+    clusters = find_nearest_clusters(user_emb, index.centroids, n=2)
+
+    # 2. KNN within those clusters
+    candidates = knn_in_clusters(user_emb, clusters, index, seen_ids, k=40)
+
+    # 3. Rerank and select
+    results = rerank_and_select(candidates, n=n)
+
+    # Edge case: if fewer than n, fall back to all clusters
+    if len(results) < n:
+        all_cluster_ids = list(range(index.centroids.shape[0]))
+        # Collect IDs already selected to avoid duplicates
+        selected_ids = {r["id"] for r in results}
+        expanded_seen = seen_ids | selected_ids
+
+        all_candidates = knn_in_clusters(
+            user_emb, all_cluster_ids, index, expanded_seen, k=40
+        )
+        extra = rerank_and_select(all_candidates, n=n - len(results))
+        results.extend(extra)
+
+    return results

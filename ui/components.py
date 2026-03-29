@@ -10,8 +10,10 @@ from __future__ import annotations
 
 from typing import Callable
 
+import streamlit as st
 
-# Human-readable label → arXiv category code mapping.
+
+# Human-readable label -> arXiv category code mapping.
 # Only topics that exist in the corpus (category_centroids) will be shown.
 TOPIC_LABELS: dict[str, str] = {
     "Machine Learning": "cs.LG",
@@ -40,54 +42,88 @@ def paper_card(
 ) -> None:
     """Render a single paper as a Streamlit card with action buttons.
 
-    Layout:
-        - Title (st.subheader)
-        - Category badges (st.caption with colored tags)
-        - Abstract snippet: first 300 characters + "..."
-        - Links: [ArXiv page] [PDF]
-        - Three action buttons in columns: Like | Save | Skip
-
     Args:
         meta: Paper metadata dict with keys: id, title, abstract, categories,
             update_date, cluster_id, rec_score.
         on_like: Callback invoked with arxiv_id when Like is clicked.
         on_save: Callback invoked with arxiv_id when Save is clicked.
         on_skip: Callback invoked with arxiv_id when Skip is clicked.
-
-    Implementation:
-        - Use st.container() for card grouping.
-        - Display title with st.subheader.
-        - Show categories as a comma-separated st.caption.
-        - Truncate abstract to 300 chars + "..." for the snippet.
-        - Build ArXiv URL: https://arxiv.org/abs/{id}
-        - Build PDF URL: https://arxiv.org/pdf/{id}
-        - Render Like/Save/Skip as st.button in 3 columns.
-        - Each button calls its respective callback with meta["id"].
     """
-    raise NotImplementedError
+    arxiv_id = meta["id"]
+    responded = st.session_state.get("responded", set())
+    is_responded = arxiv_id in responded
+
+    with st.container(border=True):
+        st.subheader(meta["title"])
+
+        # Category badges
+        categories = meta.get("categories", [])
+        if categories:
+            st.caption(" ".join(f"`{cat}`" for cat in categories))
+
+        # Abstract snippet
+        abstract = meta.get("abstract", "")
+        if len(abstract) > 300:
+            abstract = abstract[:300] + "..."
+        st.write(abstract)
+
+        # Links
+        abs_url = f"https://arxiv.org/abs/{arxiv_id}"
+        pdf_url = f"https://arxiv.org/pdf/{arxiv_id}"
+        st.markdown(f"[ArXiv page]({abs_url}) | [PDF]({pdf_url})")
+
+        # Action buttons
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if st.button(
+                "Like" if not is_responded else "Liked",
+                key=f"like_{arxiv_id}",
+                disabled=is_responded,
+            ):
+                on_like(arxiv_id)
+        with col2:
+            if st.button(
+                "Save" if not is_responded else "Saved",
+                key=f"save_{arxiv_id}",
+                disabled=is_responded,
+            ):
+                on_save(arxiv_id)
+        with col3:
+            if st.button(
+                "Skip" if not is_responded else "Skipped",
+                key=f"skip_{arxiv_id}",
+                disabled=is_responded,
+            ):
+                on_skip(arxiv_id)
 
 
 def topic_selector(category_centroids: dict) -> list[str]:
     """Render a multiselect widget for arXiv topic categories.
 
-    Only shows topics that exist in the loaded corpus (i.e., topics whose
-    arXiv category code is a key in category_centroids).
+    Only shows topics that exist in the loaded corpus.
 
     Args:
-        category_centroids: Dict mapping arXiv category string to centroid
-            vector. Used to filter TOPIC_LABELS to only available topics.
+        category_centroids: Dict mapping arXiv category string to centroid vector.
 
     Returns:
         List of selected arXiv category code strings, e.g. ["cs.LG", "cs.CV"].
-
-    Implementation:
-        - Filter TOPIC_LABELS to only include labels whose category code
-          exists as a key in category_centroids.
-        - Display st.multiselect with the filtered human-readable labels.
-        - Map selected labels back to arXiv category codes.
-        - Return the list of category codes.
     """
-    raise NotImplementedError
+    # Filter to topics that exist in the corpus
+    available: dict[str, str] = {
+        label: code
+        for label, code in TOPIC_LABELS.items()
+        if code in category_centroids
+    }
+
+    selected_labels = st.multiselect(
+        "Select your research interests",
+        options=list(available.keys()),
+        default=None,
+    )
+
+    # Map labels back to category codes (deduplicate)
+    selected_codes = list({available[label] for label in selected_labels})
+    return selected_codes
 
 
 def loading_spinner_with_message(message: str):
@@ -98,9 +134,5 @@ def loading_spinner_with_message(message: str):
 
     Returns:
         A context manager (st.spinner instance).
-
-    Usage:
-        with loading_spinner_with_message("Loading papers..."):
-            do_something()
     """
-    raise NotImplementedError
+    return st.spinner(message)

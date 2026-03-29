@@ -28,12 +28,10 @@ def find_nearest_clusters(
 
     Returns:
         List of n cluster indices (ints), sorted by descending similarity.
-
-    Implementation:
-        - sims = centroids @ user_emb   → shape (k,)
-        - Return indices of the top-n values in descending order.
     """
-    raise NotImplementedError
+    sims = centroids @ user_emb  # shape (k,)
+    top_indices = np.argsort(sims)[::-1][:n]
+    return top_indices.tolist()
 
 
 def knn_in_clusters(
@@ -57,14 +55,27 @@ def knn_in_clusters(
     Returns:
         List of (similarity_score, paper_meta_dict) tuples, sorted by
         descending similarity. Length is min(k, available unseen papers).
-
-    Implementation:
-        - mask = np.isin(index.cluster_ids, target_cluster_ids)
-        - Extract candidate embeddings: index.embeddings[mask]  → shape (M, 768)
-        - Extract candidate metadata: [index.paper_meta[i] for i, b in enumerate(mask) if b]
-        - Compute similarities: cand_embs @ user_emb  → shape (M,)
-        - Sort descending.
-        - Filter out papers whose "id" is in seen_ids.
-        - Return top k as [(score, meta), ...].
     """
-    raise NotImplementedError
+    mask = np.isin(index.cluster_ids, target_cluster_ids)
+    cand_indices = np.where(mask)[0]
+
+    if len(cand_indices) == 0:
+        return []
+
+    cand_embs = index.embeddings[cand_indices]  # shape (M, 768)
+    sims = cand_embs @ user_emb  # shape (M,)
+
+    # Sort by descending similarity
+    sorted_order = np.argsort(sims)[::-1]
+
+    results: list[tuple[float, dict]] = []
+    for idx in sorted_order:
+        original_idx = cand_indices[idx]
+        meta = index.paper_meta[original_idx]
+        if meta["id"] in seen_ids:
+            continue
+        results.append((float(sims[idx]), meta))
+        if len(results) >= k:
+            break
+
+    return results

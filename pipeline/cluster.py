@@ -9,7 +9,10 @@ Both produce unit-norm output vectors.
 
 from __future__ import annotations
 
+from collections import defaultdict
+
 import numpy as np
+from sklearn.cluster import MiniBatchKMeans
 
 
 def fit_kmeans(
@@ -26,15 +29,20 @@ def fit_kmeans(
         Tuple of:
             cluster_ids: Shape (N,) int32 — cluster assignment for each paper.
             centroids: Shape (k, 768) float32 — unit-norm cluster centroids.
-
-    Implementation:
-        - Use MiniBatchKMeans(n_clusters=k, n_init=5, random_state=42, batch_size=4096).
-        - Fit on embeddings.
-        - Extract labels_ as cluster_ids (cast to int32).
-        - Extract cluster_centers_ as centroids.
-        - Normalize each centroid row to unit length before returning.
     """
-    raise NotImplementedError
+    kmeans = MiniBatchKMeans(
+        n_clusters=k, n_init=5, random_state=42, batch_size=4096
+    )
+    kmeans.fit(embeddings)
+
+    cluster_ids = kmeans.labels_.astype(np.int32)
+    centroids = kmeans.cluster_centers_.astype(np.float32)
+
+    # Normalize centroids to unit length
+    norms = np.linalg.norm(centroids, axis=1, keepdims=True)
+    centroids = centroids / norms
+
+    return cluster_ids, centroids
 
 
 def compute_category_centroids(
@@ -51,12 +59,20 @@ def compute_category_centroids(
     Returns:
         Dict mapping category string to its unit-norm centroid (shape (768,), float32).
         Example: {"cs.LG": array(768,), "cs.CL": array(768,), ...}
-
-    Implementation:
-        - For each unique tag across all papers, collect the indices of papers
-          that have that tag.
-        - Compute the mean of the corresponding embedding rows.
-        - Normalize each mean vector to unit length.
-        - Return as a dict.
     """
-    raise NotImplementedError
+    # Collect paper indices per category tag
+    cat_indices: dict[str, list[int]] = defaultdict(list)
+    for i, meta in enumerate(paper_meta):
+        for cat in meta["categories"]:
+            cat_indices[cat].append(i)
+
+    # Compute mean embedding per category, then normalize
+    centroids: dict[str, np.ndarray] = {}
+    for cat, indices in cat_indices.items():
+        mean_vec = embeddings[indices].mean(axis=0)
+        norm = np.linalg.norm(mean_vec)
+        if norm > 1e-8:
+            mean_vec = mean_vec / norm
+        centroids[cat] = mean_vec.astype(np.float32)
+
+    return centroids

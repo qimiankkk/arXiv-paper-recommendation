@@ -9,6 +9,9 @@ Manages the lifecycle of user state within a Streamlit session:
 from __future__ import annotations
 
 import numpy as np
+import streamlit as st
+
+from user.db import get_user
 
 
 def load_or_init_session(db_path: str) -> None:
@@ -22,12 +25,11 @@ def load_or_init_session(db_path: str) -> None:
 
     Args:
         db_path: Path to the SQLite database (stored for later use).
-
-    Implementation:
-        - Check if "user_id" is already in st.session_state.
-        - If not, set all three keys to their defaults.
     """
-    raise NotImplementedError
+    if "user_id" not in st.session_state:
+        st.session_state["user_id"] = None
+        st.session_state["user_embedding"] = None
+        st.session_state["onboarded"] = False
 
 
 def login_user(user_id: str, db_path: str) -> bool:
@@ -39,14 +41,15 @@ def login_user(user_id: str, db_path: str) -> bool:
 
     Returns:
         True if the user was found and loaded, False otherwise.
-
-    Implementation:
-        - Call get_user(user_id) from user.db.
-        - If found, populate st.session_state with user_id, user_embedding,
-          and set onboarded=True.
-        - If not found, return False.
     """
-    raise NotImplementedError
+    user = get_user(user_id)
+    if user is None:
+        return False
+
+    st.session_state["user_id"] = user["user_id"]
+    st.session_state["user_embedding"] = user["embedding"]
+    st.session_state["onboarded"] = True
+    return True
 
 
 def save_embedding_to_session(embedding: np.ndarray) -> None:
@@ -54,11 +57,8 @@ def save_embedding_to_session(embedding: np.ndarray) -> None:
 
     Args:
         embedding: The new embedding, shape (768,), float32, unit-norm.
-
-    Implementation:
-        - Set st.session_state["user_embedding"] = embedding.
     """
-    raise NotImplementedError
+    st.session_state["user_embedding"] = embedding
 
 
 def is_onboarded() -> bool:
@@ -67,4 +67,4 @@ def is_onboarded() -> bool:
     Returns:
         True if st.session_state["onboarded"] is True, False otherwise.
     """
-    raise NotImplementedError
+    return st.session_state.get("onboarded", False)

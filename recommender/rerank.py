@@ -7,6 +7,9 @@ Takes the raw KNN candidates and applies:
 
 from __future__ import annotations
 
+from datetime import datetime
+from math import exp
+
 
 def recency_score(published_date: str, halflife_days: float = 30.0) -> float:
     """Compute a recency bonus score for a paper based on its publication date.
@@ -19,15 +22,20 @@ def recency_score(published_date: str, halflife_days: float = 30.0) -> float:
             Default 30.0 days.
 
     Returns:
-        Float in (0, 1]. Recent papers → ~1.0, old papers → small positive.
-
-    Implementation:
-        - Parse published_date (ISO format).
-        - age_days = (datetime.now() - published).days
-        - Clamp age to max 365 days to avoid near-zero scores on old papers.
-        - return exp(-age_days / halflife_days)
+        Float in (0, 1]. Recent papers -> ~1.0, old papers -> small positive.
     """
-    raise NotImplementedError
+    try:
+        published = datetime.fromisoformat(published_date)
+    except (ValueError, TypeError):
+        # If date can't be parsed, return a neutral mid-range score
+        return 0.5
+
+    age_days = (datetime.now() - published).days
+    # Clamp age to max 365 days to avoid near-zero scores on old papers
+    age_days = min(age_days, 365)
+    age_days = max(age_days, 0)
+
+    return exp(-age_days / halflife_days)
 
 
 def rerank_and_select(
@@ -41,21 +49,32 @@ def rerank_and_select(
         candidates: List of (similarity_score, paper_meta_dict) tuples
             from the retrieval stage.
         recency_weight: Weight of the recency bonus in the final score.
-            Final score = sim_score + recency_weight * recency_score(date).
         n: Number of papers to select.
 
     Returns:
-        List of n paper_meta dicts, each with an added "rec_score" key
-        containing the final combined score.
-
-    Implementation:
-        - For each (sim_score, meta) in candidates:
-            - Compute final score = sim_score + recency_weight * recency_score(meta["update_date"])
-            - Attach score to meta dict as meta["rec_score"]
-        - Sort all candidates by final score descending.
-        - Diversity pass: iterate through sorted candidates. Add a paper only
-          if its cluster_id has not been used yet in the selection.
-        - Stop when n papers are selected.
-        - Return the list of n meta dicts.
+        List of up to n paper_meta dicts, each with an added "rec_score" key.
     """
-    raise NotImplementedError
+    # Score each candidate
+    scored: list[tuple[float, dict]] = []
+    for sim_score, meta in candidates:
+        bonus = recency_weight * recency_score(meta.get("update_date", ""))
+        final_score = sim_score + bonus
+        meta["rec_score"] = final_score
+        scored.append((final_score, meta))
+
+    # Sort by final score descending
+    scored.sort(key=lambda x: x[0], reverse=True)
+
+    # Diversity pass: at most one paper per cluster
+    selected: list[dict] = []
+    used_clusters: set[int] = set()
+    for _score, meta in scored:
+        cid = meta.get("cluster_id")
+        if cid in used_clusters:
+            continue
+        used_clusters.add(cid)
+        selected.append(meta)
+        if len(selected) >= n:
+            break
+
+    return selected

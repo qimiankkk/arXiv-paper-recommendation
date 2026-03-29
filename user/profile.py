@@ -34,16 +34,26 @@ def init_embedding_from_topics(
 
     Returns:
         Unit-norm embedding of shape (768,), float32.
-
-    Implementation:
-        - Collect the centroid vectors for each selected category that exists
-          in category_centroids.
-        - Compute their element-wise mean.
-        - Normalize to unit length.
-        - Fallback: if no selected category is found in category_centroids,
-          return the first available centroid and log a warning.
     """
-    raise NotImplementedError
+    vectors = [
+        category_centroids[cat]
+        for cat in selected_categories
+        if cat in category_centroids
+    ]
+
+    if not vectors:
+        # Fallback: no selected category found in corpus
+        print("WARNING: No selected categories found in corpus. Using fallback centroid.")
+        first_centroid = next(iter(category_centroids.values()))
+        return first_centroid.astype(np.float32).copy()
+
+    mean_vec = np.mean(vectors, axis=0)
+    norm = np.linalg.norm(mean_vec)
+    if norm < 1e-8:
+        first_centroid = next(iter(category_centroids.values()))
+        return first_centroid.astype(np.float32).copy()
+
+    return (mean_vec / norm).astype(np.float32)
 
 
 def apply_feedback(
@@ -53,11 +63,6 @@ def apply_feedback(
     alpha: float = EMA_ALPHA,
 ) -> np.ndarray:
     """Update the user embedding via exponential moving average after feedback.
-
-    The update formula:
-        w   = FEEDBACK_WEIGHTS[signal]
-        raw = (1 - alpha) * user_embedding + alpha * w * paper_embedding
-        return raw / ||raw||    (re-normalize to unit length)
 
     Args:
         user_embedding: Current user embedding, shape (768,), float32, unit-norm.
@@ -71,4 +76,9 @@ def apply_feedback(
         If the resulting norm is < 1e-8 (degenerate case), returns
         the original user_embedding unchanged as a safety guard.
     """
-    raise NotImplementedError
+    w = FEEDBACK_WEIGHTS[signal]
+    raw = (1 - alpha) * user_embedding + alpha * w * paper_embedding
+    norm = np.linalg.norm(raw)
+    if norm < 1e-8:
+        return user_embedding
+    return (raw / norm).astype(np.float32)

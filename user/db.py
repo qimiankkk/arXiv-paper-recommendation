@@ -14,37 +14,52 @@ Embedding serialization:
 
 from __future__ import annotations
 
+import sqlite3
+import uuid
+from datetime import datetime, timezone
+
 import numpy as np
 
+DB_PATH = "data/arxiv_rec.db"
 
-def init_db(db_path: str = "data/arxiv_rec.db") -> None:
+
+def _connect(db_path: str = DB_PATH) -> sqlite3.Connection:
+    """Return a connection to the SQLite database."""
+    return sqlite3.connect(db_path)
+
+
+def init_db(db_path: str = DB_PATH) -> None:
     """Create the users and feedback tables if they do not exist.
-
-    Schema — users:
-        user_id      TEXT PRIMARY KEY  — UUID string
-        display_name TEXT              — user-chosen display name
-        embedding    BLOB              — numpy float32 array as raw bytes
-        created_at   TEXT              — ISO datetime
-        last_active  TEXT              — ISO datetime
-
-    Schema — feedback:
-        id           INTEGER PRIMARY KEY AUTOINCREMENT
-        user_id      TEXT               — FK to users.user_id
-        arxiv_id     TEXT               — arXiv paper ID
-        signal       TEXT               — "like" | "save" | "skip"
-        cluster_id   INTEGER            — cluster of the paper (for analytics)
-        score        REAL               — recommendation score at time of serving
-        created_at   TEXT               — ISO datetime
 
     Args:
         db_path: Path to the SQLite database file.
-
-    Implementation:
-        - Connect to db_path with sqlite3.connect().
-        - Execute CREATE TABLE IF NOT EXISTS for both tables.
-        - Commit and close.
     """
-    raise NotImplementedError
+    global DB_PATH
+    DB_PATH = db_path
+
+    conn = _connect(db_path)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            user_id      TEXT PRIMARY KEY,
+            display_name TEXT NOT NULL,
+            embedding    BLOB NOT NULL,
+            created_at   TEXT NOT NULL,
+            last_active  TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS feedback (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id    TEXT NOT NULL,
+            arxiv_id   TEXT NOT NULL,
+            signal     TEXT NOT NULL,
+            cluster_id INTEGER NOT NULL,
+            score      REAL NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
+    conn.commit()
+    conn.close()
 
 
 def create_user(display_name: str, embedding: np.ndarray) -> str:
@@ -56,14 +71,20 @@ def create_user(display_name: str, embedding: np.ndarray) -> str:
 
     Returns:
         The generated user_id (UUID string).
-
-    Implementation:
-        - Generate a UUID4 string.
-        - Serialize embedding as embedding.astype(np.float32).tobytes().
-        - INSERT into users with current ISO datetime for created_at and last_active.
-        - Return the user_id.
     """
-    raise NotImplementedError
+    user_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    blob = embedding.astype(np.float32).tobytes()
+
+    conn = _connect()
+    conn.execute(
+        "INSERT INTO users (user_id, display_name, embedding, created_at, last_active) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (user_id, display_name, blob, now, now),
+    )
+    conn.commit()
+    conn.close()
+    return user_id
 
 
 def get_user(user_id: str) -> dict | None:
@@ -74,15 +95,26 @@ def get_user(user_id: str) -> dict | None:
 
     Returns:
         Dict with keys: user_id, display_name, embedding (np.ndarray float32),
-        created_at, last_active.
-        Returns None if user not found.
-
-    Implementation:
-        - SELECT * FROM users WHERE user_id=?
-        - Decode embedding BLOB → np.frombuffer(blob, dtype=np.float32).
-        - Return as dict.
+        created_at, last_active. Returns None if user not found.
     """
-    raise NotImplementedError
+    conn = _connect()
+    row = conn.execute(
+        "SELECT user_id, display_name, embedding, created_at, last_active "
+        "FROM users WHERE user_id = ?",
+        (user_id,),
+    ).fetchone()
+    conn.close()
+
+    if row is None:
+        return None
+
+    return {
+        "user_id": row[0],
+        "display_name": row[1],
+        "embedding": np.frombuffer(row[2], dtype=np.float32).copy(),
+        "created_at": row[3],
+        "last_active": row[4],
+    }
 
 
 def update_embedding(user_id: str, embedding: np.ndarray) -> None:
@@ -91,12 +123,17 @@ def update_embedding(user_id: str, embedding: np.ndarray) -> None:
     Args:
         user_id: The UUID string of the user.
         embedding: The new embedding, shape (768,), float32, unit-norm.
-
-    Implementation:
-        - Serialize embedding as embedding.astype(np.float32).tobytes().
-        - UPDATE users SET embedding=?, last_active=? WHERE user_id=?
     """
-    raise NotImplementedError
+    now = datetime.now(timezone.utc).isoformat()
+    blob = embedding.astype(np.float32).tobytes()
+
+    conn = _connect()
+    conn.execute(
+        "UPDATE users SET embedding = ?, last_active = ? WHERE user_id = ?",
+        (blob, now, user_id),
+    )
+    conn.commit()
+    conn.close()
 
 
 def log_feedback(
@@ -114,12 +151,17 @@ def log_feedback(
         signal: One of "like", "save", "skip".
         cluster_id: The cluster ID of the paper.
         score: The recommendation score at the time of serving.
-
-    Implementation:
-        - INSERT INTO feedback (user_id, arxiv_id, signal, cluster_id, score, created_at)
-        - Use current ISO datetime for created_at.
     """
-    raise NotImplementedError
+    now = datetime.now(timezone.utc).isoformat()
+
+    conn = _connect()
+    conn.execute(
+        "INSERT INTO feedback (user_id, arxiv_id, signal, cluster_id, score, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (user_id, arxiv_id, signal, cluster_id, score, now),
+    )
+    conn.commit()
+    conn.close()
 
 
 def get_seen_ids(user_id: str) -> set[str]:
@@ -129,11 +171,13 @@ def get_seen_ids(user_id: str) -> set[str]:
         user_id: The UUID string of the user.
 
     Returns:
-        Set of arxiv_id strings from all feedback rows for this user,
-        regardless of signal type. Once seen, a paper is never re-served.
-
-    Implementation:
-        - SELECT arxiv_id FROM feedback WHERE user_id=?
-        - Return as a set.
+        Set of arxiv_id strings from all feedback rows for this user.
     """
-    raise NotImplementedError
+    conn = _connect()
+    rows = conn.execute(
+        "SELECT arxiv_id FROM feedback WHERE user_id = ?",
+        (user_id,),
+    ).fetchall()
+    conn.close()
+
+    return {row[0] for row in rows}

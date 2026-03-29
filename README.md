@@ -65,28 +65,33 @@ No Docker. No external vector DB. No cloud services. Everything runs locally wit
 ## Project Structure
 
 ```
-arxiv-rec/
+arXiv-paper-recommendation/
 ├── app.py                       # Streamlit entry point
 ├── requirements.txt
+├── IMPLEMENTATION_PLAN.md       # Build notes and phase plan
 ├── .streamlit/config.toml       # Theme + server config
 │
 ├── pipeline/
+│   ├── __init__.py
 │   ├── embed.py                 # SPECTER2 embedding wrapper
 │   ├── cluster.py               # k-means + category centroids
 │   ├── index.py                 # In-memory paper index for serving
 │   └── offline.py               # Orchestrates embed → cluster → save
 │
 ├── user/
+│   ├── __init__.py
 │   ├── db.py                    # SQLite schema + CRUD
 │   ├── profile.py               # Cold-start init, EMA update
 │   └── session.py               # Streamlit session state helpers
 │
 ├── recommender/
+│   ├── __init__.py
 │   ├── retrieve.py              # Cluster selection + KNN
 │   ├── rerank.py                # Recency boost + diversity filter
 │   └── engine.py                # Top-level recommend() function
 │
 ├── ui/
+│   ├── __init__.py
 │   ├── components.py            # Reusable Streamlit widgets
 │   ├── onboarding.py            # Topic selection page
 │   └── daily_feed.py            # 3-paper card view
@@ -100,7 +105,10 @@ arxiv-rec/
 │   └── arxiv_rec.db             # SQLite database
 │
 └── scripts/
-    └── run_offline_pipeline.py  # CLI for the offline pipeline
+    ├── run_offline_pipeline.py  # CLI for offline pipeline generation
+    ├── reset_db.py              # Reset local SQLite test data
+    ├── test_db.py               # Quick DB sanity checks
+    └── test_engine.py           # Quick recommendation sanity checks
 ```
 
 ## Getting Started
@@ -130,3 +138,11 @@ streamlit run app.py
 ```
 
 Visit `http://localhost:8501`, pick your topics, and start reading.
+
+### Reset test data (for testing use)
+
+To clear local user/test data and recreate an empty DB schema:
+
+```bash
+python scripts/reset_db.py
+```

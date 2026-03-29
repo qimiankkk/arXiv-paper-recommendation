@@ -1,6 +1,7 @@
 streamlit>=1.35
 numpy>=1.26
 scikit-learn>=1.4
-sentence-transformers>=3.0
+transformers>=4.40
+adapters>=1.0
 kagglehub>=0.2
-torch>=2.2          # CPU-only is fine; sentence-transformers dep
+torch>=2.2          # CPU-only is fine

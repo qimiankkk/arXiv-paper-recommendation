@@ -1,0 +1,17 @@
+# Generated data artifacts
+data/embeddings.npy
+data/cluster_ids.npy
+data/centroids.npy
+data/category_centroids.npy
+data/paper_meta.jsonl
+data/arxiv_rec.db
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Environment
+.env
+.venv/
+venv/

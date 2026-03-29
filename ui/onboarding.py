@@ -7,30 +7,45 @@ with an initial embedding derived from the selected category centroids.
 
 from __future__ import annotations
 
+import streamlit as st
+
 from pipeline.index import PaperIndex
+from user.db import create_user
+from user.profile import init_embedding_from_topics
+from ui.components import topic_selector
 
 
 def render_onboarding(index: PaperIndex, db_path: str) -> None:
     """Render the onboarding page for a new (not yet onboarded) user.
 
-    Page layout:
-        1. App title + one-line description.
-        2. Name input field (st.text_input).
-        3. topic_selector() widget showing available arXiv categories.
-        4. "Start reading" button.
-
-    On button click:
-        - Validate: name must be non-empty, at least 1 topic must be selected.
-        - Compute initial embedding:
-            embedding = init_embedding_from_topics(selected, index.category_centroids)
-        - Create user in database:
-            user_id = create_user(name, embedding)
-        - Update st.session_state:
-            user_id, user_embedding, onboarded = True
-        - Call st.rerun() to transition to the daily feed.
-
     Args:
         index: The loaded PaperIndex (needed for category_centroids).
         db_path: Path to the SQLite database.
     """
-    raise NotImplementedError
+    st.title("ArXiv Daily")
+    st.write("Personalized paper recommendations from arXiv, delivered daily.")
+
+    st.divider()
+
+    name = st.text_input("Your name", placeholder="Enter your display name")
+
+    st.write("**Pick topics you're interested in:**")
+    selected_categories = topic_selector(index.category_centroids)
+
+    if st.button("Start reading", type="primary"):
+        if not name.strip():
+            st.error("Please enter your name.")
+            return
+        if not selected_categories:
+            st.error("Please select at least one topic.")
+            return
+
+        embedding = init_embedding_from_topics(
+            selected_categories, index.category_centroids
+        )
+        user_id = create_user(name.strip(), embedding)
+
+        st.session_state["user_id"] = user_id
+        st.session_state["user_embedding"] = embedding
+        st.session_state["onboarded"] = True
+        st.rerun()
