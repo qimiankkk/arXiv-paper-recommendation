@@ -67,9 +67,13 @@ No Docker. No external vector DB. No cloud services. Everything runs locally wit
 ```
 arXiv-paper-recommendation/
 ├── app.py                       # Streamlit entry point
+├── README.md
 ├── requirements.txt
-├── IMPLEMENTATION_PLAN.md       # Build notes and phase plan
 ├── .streamlit/config.toml       # Theme + server config
+│
+├── docs/                        # Algorithm documentations
+│   ├── arxiv_rec_algorithm_description.html
+│   └── final_proj_alg_v1.pdf
 │
 ├── pipeline/
 │   ├── __init__.py
@@ -96,13 +100,14 @@ arXiv-paper-recommendation/
 │   ├── onboarding.py            # Topic selection page
 │   └── daily_feed.py            # 3-paper card view
 │
-├── data/                        # Generated artifacts (gitignored)
+├── data/                        # Local artifacts (created at runtime)
+│   ├── .gitkeep
 │   ├── embeddings.npy           # N x 768 float32
 │   ├── cluster_ids.npy          # N, int32
 │   ├── centroids.npy            # 500 x 768 float32
 │   ├── category_centroids.npy   # Dict of category → vector
 │   ├── paper_meta.jsonl         # One JSON object per line
-│   └── arxiv_rec.db             # SQLite database
+│   └── arxiv_rec.db             # SQLite user database
 │
 └── scripts/
     ├── run_offline_pipeline.py  # CLI for offline pipeline generation
