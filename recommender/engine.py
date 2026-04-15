@@ -14,49 +14,46 @@ from recommender.rerank import rerank_and_select
 
 
 def recommend(
-    user_emb: np.ndarray,
+    user_centroids: np.ndarray,
     seen_ids: set[str],
     index: PaperIndex,
-    n: int = 3,
+    diversity: float = 0.5,
+    n: int = 5,
 ) -> list[dict]:
     """Generate n paper recommendations for a user.
 
-    Orchestrates the full recommendation pipeline:
-    1. Find nearest clusters to the user embedding.
-    2. KNN search within those clusters (excluding seen papers).
-    3. Rerank with recency boost and diversity filter.
-
     Args:
-        user_emb: Shape (768,), float32, unit-norm user embedding.
-        seen_ids: Set of arXiv paper IDs the user has already seen.
-        index: The loaded PaperIndex containing all embeddings and metadata.
-        n: Number of papers to recommend. Default 3.
+        user_centroids: Shape (k_u, 768), float32, unit-norm rows.
+        seen_ids: Set of arXiv paper IDs already seen.
+        index: Loaded PaperIndex.
+        diversity: δ slider value, 0.0–1.0.
+        n: Papers to recommend. Default 5.
 
     Returns:
-        List of up to n paper_meta dicts, each with an added "rec_score" key.
-        May return fewer than n if the user has seen most papers or the
-        index is small.
+        List of up to n paper_meta dicts with "rec_score" added.
     """
-    # 1. Find nearest clusters
-    clusters = find_nearest_clusters(user_emb, index.centroids, n=2)
+    k_u = user_centroids.shape[0]
+
+    # 1. Cluster selection (δ controls budget)
+    clusters = find_nearest_clusters(user_centroids, index.centroids, diversity)
 
     # 2. KNN within those clusters
-    candidates = knn_in_clusters(user_emb, clusters, index, seen_ids, k=40)
+    candidates = knn_in_clusters(user_centroids, clusters, index, seen_ids, k=40)
 
-    # 3. Rerank and select
-    results = rerank_and_select(candidates, n=n)
+    # 3. Rerank + diversity filter
+    results = rerank_and_select(candidates, k_u=k_u, diversity=diversity, n=n)
 
-    # Edge case: if fewer than n, fall back to all clusters
+    # Fallback: if too few results, search all clusters
     if len(results) < n:
-        all_cluster_ids = list(range(index.centroids.shape[0]))
-        # Collect IDs already selected to avoid duplicates
+        all_clusters = list(range(index.centroids.shape[0]))
         selected_ids = {r["id"] for r in results}
         expanded_seen = seen_ids | selected_ids
-
         all_candidates = knn_in_clusters(
-            user_emb, all_cluster_ids, index, expanded_seen, k=40
+            user_centroids, all_clusters, index, expanded_seen, k=40
         )
-        extra = rerank_and_select(all_candidates, n=n - len(results))
+        extra = rerank_and_select(
+            all_candidates, k_u=k_u, diversity=diversity, n=n - len(results)
+        )
         results.extend(extra)
 
     return results

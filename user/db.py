@@ -1,15 +1,15 @@
 """SQLite database schema and CRUD operations for user profiles and feedback.
 
 Two tables:
-    users    — stores user profile with serialized embedding blob.
+    users    — stores user profile with serialized multi-vector centroids blob.
     feedback — logs every like/save/skip interaction for analytics and seen_ids.
 
 No ORM; uses plain sqlite3. All writes are synchronous (Streamlit is
 single-user per session, so no threading is needed).
 
-Embedding serialization:
-    Store:  embedding.astype(np.float32).tobytes()
-    Load:   np.frombuffer(blob, dtype=np.float32)
+Centroids serialization:
+    Store:  centroids.astype(np.float32).tobytes()   # shape (k_u, 768) flattened
+    Load:   np.frombuffer(blob, dtype=np.float32).copy().reshape(k_u, 768)
 """
 
 from __future__ import annotations
@@ -42,7 +42,9 @@ def init_db(db_path: str = DB_PATH) -> None:
         CREATE TABLE IF NOT EXISTS users (
             user_id      TEXT PRIMARY KEY,
             display_name TEXT NOT NULL,
-            embedding    BLOB NOT NULL,
+            centroids    BLOB NOT NULL,
+            k_u          INTEGER NOT NULL DEFAULT 1,
+            diversity    REAL NOT NULL DEFAULT 0.5,
             created_at   TEXT NOT NULL,
             last_active  TEXT NOT NULL
         )
@@ -62,25 +64,32 @@ def init_db(db_path: str = DB_PATH) -> None:
     conn.close()
 
 
-def create_user(display_name: str, embedding: np.ndarray) -> str:
+def create_user(
+    display_name: str,
+    centroids: np.ndarray,
+    k_u: int,
+    diversity: float = 0.5,
+) -> str:
     """Create a new user record in the database.
 
     Args:
         display_name: The user's display name.
-        embedding: The user's initial embedding, shape (768,), float32, unit-norm.
+        centroids: The user's initial centroids, shape (k_u, 768), float32, unit-norm rows.
+        k_u: Number of research threads (1–3).
+        diversity: The diversity slider value, 0.0–1.0.
 
     Returns:
         The generated user_id (UUID string).
     """
     user_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
-    blob = embedding.astype(np.float32).tobytes()
+    blob = centroids.astype(np.float32).tobytes()
 
     conn = _connect()
     conn.execute(
-        "INSERT INTO users (user_id, display_name, embedding, created_at, last_active) "
-        "VALUES (?, ?, ?, ?, ?)",
-        (user_id, display_name, blob, now, now),
+        "INSERT INTO users (user_id, display_name, centroids, k_u, diversity, "
+        "created_at, last_active) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (user_id, display_name, blob, k_u, diversity, now, now),
     )
     conn.commit()
     conn.close()
@@ -94,13 +103,13 @@ def get_user(user_id: str) -> dict | None:
         user_id: The UUID string of the user.
 
     Returns:
-        Dict with keys: user_id, display_name, embedding (np.ndarray float32),
-        created_at, last_active. Returns None if user not found.
+        Dict with keys: user_id, display_name, centroids (np.ndarray shape (k_u, 768)),
+        k_u, diversity, created_at, last_active. Returns None if user not found.
     """
     conn = _connect()
     row = conn.execute(
-        "SELECT user_id, display_name, embedding, created_at, last_active "
-        "FROM users WHERE user_id = ?",
+        "SELECT user_id, display_name, centroids, k_u, diversity, "
+        "created_at, last_active FROM users WHERE user_id = ?",
         (user_id,),
     ).fetchone()
     conn.close()
@@ -108,28 +117,31 @@ def get_user(user_id: str) -> dict | None:
     if row is None:
         return None
 
+    k_u = row[3]
     return {
         "user_id": row[0],
         "display_name": row[1],
-        "embedding": np.frombuffer(row[2], dtype=np.float32).copy(),
-        "created_at": row[3],
-        "last_active": row[4],
+        "centroids": np.frombuffer(row[2], dtype=np.float32).copy().reshape(k_u, 768),
+        "k_u": k_u,
+        "diversity": row[4],
+        "created_at": row[5],
+        "last_active": row[6],
     }
 
 
-def update_embedding(user_id: str, embedding: np.ndarray) -> None:
-    """Update a user's embedding in the database.
+def update_centroids(user_id: str, centroids: np.ndarray) -> None:
+    """Update a user's centroids in the database.
 
     Args:
         user_id: The UUID string of the user.
-        embedding: The new embedding, shape (768,), float32, unit-norm.
+        centroids: The new centroids, shape (k_u, 768), float32, unit-norm rows.
     """
     now = datetime.now(timezone.utc).isoformat()
-    blob = embedding.astype(np.float32).tobytes()
+    blob = centroids.astype(np.float32).tobytes()
 
     conn = _connect()
     conn.execute(
-        "UPDATE users SET embedding = ?, last_active = ? WHERE user_id = ?",
+        "UPDATE users SET centroids = ?, last_active = ? WHERE user_id = ?",
         (blob, now, user_id),
     )
     conn.commit()

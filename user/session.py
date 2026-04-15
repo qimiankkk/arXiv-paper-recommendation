@@ -3,7 +3,7 @@
 Manages the lifecycle of user state within a Streamlit session:
 - Initializing default session values for new visitors.
 - Loading an existing user from the DB into the session.
-- Syncing embedding updates between session state and DB.
+- Syncing centroid updates between session state and DB.
 """
 
 from __future__ import annotations
@@ -20,7 +20,9 @@ def load_or_init_session(db_path: str) -> None:
     Called once at app startup. If user state is not already present in
     st.session_state, sets the following keys:
         - "user_id": None
-        - "user_embedding": None
+        - "user_centroids": None
+        - "user_k_u": None
+        - "user_diversity": None
         - "onboarded": False
 
     Args:
@@ -28,7 +30,9 @@ def load_or_init_session(db_path: str) -> None:
     """
     if "user_id" not in st.session_state:
         st.session_state["user_id"] = None
-        st.session_state["user_embedding"] = None
+        st.session_state["user_centroids"] = None
+        st.session_state["user_k_u"] = None
+        st.session_state["user_diversity"] = None
         st.session_state["onboarded"] = False
 
 
@@ -47,18 +51,20 @@ def login_user(user_id: str, db_path: str) -> bool:
         return False
 
     st.session_state["user_id"] = user["user_id"]
-    st.session_state["user_embedding"] = user["embedding"]
+    st.session_state["user_centroids"] = user["centroids"]
+    st.session_state["user_k_u"] = user["k_u"]
+    st.session_state["user_diversity"] = user["diversity"]
     st.session_state["onboarded"] = True
     return True
 
 
-def save_embedding_to_session(embedding: np.ndarray) -> None:
-    """Update the user embedding in the current Streamlit session state.
+def save_centroids_to_session(centroids: np.ndarray) -> None:
+    """Update the user centroids in the current Streamlit session state.
 
     Args:
-        embedding: The new embedding, shape (768,), float32, unit-norm.
+        centroids: The new centroids, shape (k_u, 768), float32, unit-norm rows.
     """
-    st.session_state["user_embedding"] = embedding
+    st.session_state["user_centroids"] = centroids
 
 
 def is_onboarded() -> bool:

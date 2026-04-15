@@ -5,3 +5,5 @@ transformers>=4.40
 adapters>=1.0
 kagglehub>=0.2
 torch>=2.2          # CPU-only is fine
+beautifulsoup4>=4.12
+requests>=2.31
