@@ -18,6 +18,24 @@ import numpy as np
 from pipeline.index import PaperIndex
 
 
+def _is_withdrawn_paper(meta: dict) -> bool:
+    """Return True when metadata indicates a withdrawn paper.
+
+    arXiv withdrawal signals are usually present in title/abstract text
+    (e.g. "This paper has been withdrawn by the author(s)").
+    """
+    text = f"{meta.get('title', '')} {meta.get('abstract', '')}".lower()
+    return any(
+        marker in text
+        for marker in (
+            "withdrawn",
+            "retracted",
+            "withdrawal",
+            "this paper has been withdrawn",
+        )
+    )
+
+
 def find_nearest_clusters(
     user_centroids: np.ndarray,
     index_centroids: np.ndarray,
@@ -91,6 +109,8 @@ def knn_in_clusters(
         original_idx = cand_indices[idx]
         meta = index.paper_meta[original_idx]
         if meta["id"] in seen_ids:
+            continue
+        if _is_withdrawn_paper(meta):
             continue
         results.append((
             float(max_sims[idx]),
