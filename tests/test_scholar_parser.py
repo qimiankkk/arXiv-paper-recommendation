@@ -1,4 +1,12 @@
-"""Tests for pipeline.scholar_parser module."""
+"""
+Tests for pipeline.scholar_parser module.
+
+To run just the live tests: 
+    pytest tests/test_scholar_parser.py -m live -v -s
+
+To skip them: 
+    pytest tests/test_scholar_parser.py -m "not live"
+"""
 
 from __future__ import annotations
 
@@ -459,7 +467,7 @@ class TestLiveScholarProfiles:
         print(f"{'-'*70}")
         for i, p in enumerate(papers_raw, 1):
             authors_short = p["authors"][:50] + ("..." if len(p["authors"]) > 50 else "")
-            print(f"{i:<4} {p['year']:<6} {p['citations']:<7} {authors_short:<52} {p['title'][:60]}")
+            print(f"{i:<4} {p['year']:<6} {p['citations']:<7} {authors_short:<52} {p['title'][:]}")
 
         # --- Step 2: Filter ---
         t1 = _time.perf_counter()
