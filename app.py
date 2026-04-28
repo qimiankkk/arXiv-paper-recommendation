@@ -21,7 +21,7 @@ DB_PATH = "data/arxiv_rec.db"
 st.set_page_config(
     page_title="ArXiv Daily",
     page_icon="📄",
-    layout="centered",
+    layout="wide",
 )
 
 

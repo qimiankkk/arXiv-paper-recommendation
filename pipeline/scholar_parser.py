@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 from datetime import datetime
 from html import unescape
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, urljoin
 
 import requests
 
@@ -115,6 +115,8 @@ def _parse_rows_bs4(soup, max_papers: int) -> list[dict]:
         if not title_el:
             continue
         title = title_el.get_text(strip=True)
+        href = title_el.get("href", "")
+        paper_url = urljoin("https://scholar.google.com", href) if href else ""
 
         gray_divs = row.select("td.gsc_a_t div.gs_gray")
         authors = gray_divs[0].get_text(strip=True) if len(gray_divs) > 0 else ""
@@ -133,6 +135,7 @@ def _parse_rows_bs4(soup, max_papers: int) -> list[dict]:
             "citations": citations,
             "year": year,
             "abstract": "",
+            "url": paper_url,
         })
     return papers
 
@@ -147,11 +150,13 @@ def _parse_rows_regex(html: str, max_papers: int) -> list[dict]:
     )
     for row_html in row_matches[:max_papers]:
         title_m = re.search(
-            r'<a[^>]*class="[^"]*gsc_a_at[^"]*"[^>]*>(.*?)</a>', row_html
+            r'<a[^>]*class="[^"]*gsc_a_at[^"]*"[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
+            row_html,
         )
         if not title_m:
             continue
-        title = unescape(re.sub(r"<[^>]+>", "", title_m.group(1))).strip()
+        paper_url = urljoin("https://scholar.google.com", title_m.group(1))
+        title = unescape(re.sub(r"<[^>]+>", "", title_m.group(2))).strip()
 
         gray = re.findall(
             r'<div[^>]*class="[^"]*gs_gray[^"]*"[^>]*>(.*?)</div>', row_html
@@ -178,13 +183,101 @@ def _parse_rows_regex(html: str, max_papers: int) -> list[dict]:
             "citations": citations,
             "year": year,
             "abstract": "",
+            "url": paper_url,
         })
     return papers
+
+
+def _extract_description_bs4(soup) -> str:
+    """Extract paper description/abstract from a Scholar citation page."""
+    for row in soup.select("div.gsc_oci_row"):
+        field_el = row.select_one("div.gsc_oci_field")
+        value_el = row.select_one("div.gsc_oci_value")
+        if not field_el or not value_el:
+            continue
+        field = field_el.get_text(" ", strip=True).lower()
+        if field in {"description", "abstract", "summary"}:
+            text = value_el.get_text(" ", strip=True)
+            if text:
+                return text
+
+    descr_el = soup.select_one("#gsc_oci_descr")
+    if descr_el:
+        text = descr_el.get_text(" ", strip=True)
+        if text:
+            return text
+
+    meta_el = soup.select_one('meta[name="description"]')
+    if meta_el and meta_el.get("content"):
+        return meta_el["content"].strip()
+    return ""
+
+
+def _extract_description_regex(html: str) -> str:
+    """Regex fallback to extract description from citation detail page."""
+    rows = re.findall(
+        r'<div[^>]*class="[^"]*gsc_oci_row[^"]*"[^>]*>(.*?)</div>\s*</div>',
+        html,
+        re.DOTALL,
+    )
+    for row in rows:
+        field_m = re.search(r'gsc_oci_field[^>]*>(.*?)</div>', row, re.DOTALL)
+        value_m = re.search(r'gsc_oci_value[^>]*>(.*?)</div>', row, re.DOTALL)
+        if not field_m or not value_m:
+            continue
+        field = unescape(re.sub(r"<[^>]+>", "", field_m.group(1))).strip().lower()
+        if field in {"description", "abstract", "summary"}:
+            text = unescape(re.sub(r"<[^>]+>", "", value_m.group(1))).strip()
+            if text:
+                return text
+
+    descr_m = re.search(r'id="gsc_oci_descr"[^>]*>(.*?)</div>', html, re.DOTALL)
+    if descr_m:
+        text = unescape(re.sub(r"<[^>]+>", "", descr_m.group(1))).strip()
+        if text:
+            return text
+
+    meta_m = re.search(
+        r'<meta[^>]*name="description"[^>]*content="([^"]+)"[^>]*>',
+        html,
+    )
+    if meta_m:
+        return unescape(meta_m.group(1)).strip()
+    return ""
+
+
+def fetch_scholar_paper_description(paper_url: str) -> str:
+    """Fetch description text from a Scholar citation detail URL."""
+    if not paper_url:
+        return ""
+    resp = requests.get(paper_url, headers=SCHOLAR_HEADERS, timeout=15)
+    resp.raise_for_status()
+
+    if BeautifulSoup is not None:
+        soup = BeautifulSoup(resp.text, "html.parser")
+        return _extract_description_bs4(soup)
+    return _extract_description_regex(resp.text)
+
+
+def enrich_scholar_papers_with_descriptions(papers: list[dict]) -> list[dict]:
+    """Populate each paper['abstract'] from its Scholar detail page."""
+    enriched: list[dict] = []
+    for paper in papers:
+        p = dict(paper)
+        paper_url = p.get("url", "")
+        try:
+            description = fetch_scholar_paper_description(paper_url)
+        except requests.RequestException:
+            description = ""
+        p["abstract"] = description or p.get("abstract", "") or ""
+        enriched.append(p)
+    return enriched
 
 
 def fetch_scholar_papers(
     user_id: str,
     max_papers: int = 30,
+    sort_by_pubdate: bool = True,
 ) -> tuple[list[dict], str]:
     """Scrape paper metadata and profile name from a Google Scholar profile.
 
@@ -193,6 +286,8 @@ def fetch_scholar_papers(
     Args:
         user_id: The Google Scholar user ID.
         max_papers: Maximum papers to retrieve. Default 30.
+        sort_by_pubdate: If True, request newest-first ordering from Scholar.
+            If False, use Scholar's default ordering (typically citation-based).
 
     Returns:
         Tuple of (papers, profile_name).  Each paper dict has keys:
@@ -200,8 +295,10 @@ def fetch_scholar_papers(
     """
     url = (
         f"https://scholar.google.com/citations"
-        f"?user={user_id}&cstart=0&pagesize={max_papers}&sortby=pubdate"
+        f"?user={user_id}&cstart=0&pagesize={max_papers}"
     )
+    if sort_by_pubdate:
+        url += "&sortby=pubdate"
     resp = requests.get(url, headers=SCHOLAR_HEADERS, timeout=15)
     resp.raise_for_status()
 

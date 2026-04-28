@@ -1,15 +1,22 @@
-"""Onboarding page: topic selection + optional Scholar profile + diversity slider."""
+"""Onboarding page: three exclusive user-initialization modes."""
 
 from __future__ import annotations
 
 import streamlit as st
-import numpy as np
 
 from pipeline.index import PaperIndex
 from pipeline.embed import EmbeddingModel
-from pipeline.scholar_parser import load_scholar_papers
+from pipeline.scholar_parser import (
+    enrich_scholar_papers_with_descriptions,
+    fetch_scholar_papers,
+    parse_scholar_url,
+)
 from user.db import create_user
-from user.profile import init_user_profile
+from user.profile import (
+    init_user_profile_from_description,
+    init_user_profile_from_topics,
+    init_user_profile_from_scholar_top3,
+)
 from ui.components import topic_selector
 
 
@@ -25,16 +32,39 @@ def render_onboarding(index: PaperIndex, db_path: str) -> None:
 
     name = st.text_input("Your name", placeholder="Enter your display name")
 
-    st.write("**Pick topics you're interested in:**")
-    selected_categories = topic_selector(index.category_centroids)
-
-    # -- Optional Scholar profile --
-    st.write("**Optional:** paste your Google Scholar profile URL for "
-             "more precise first-day recommendations.")
-    scholar_url = st.text_input(
-        "Google Scholar URL",
-        placeholder="https://scholar.google.com/citations?user=...",
+    st.write("**Choose one initialization method (three options, no mixing):**")
+    init_mode = st.radio(
+        "Initialization mode",
+        options=[
+            "Natural language description",
+            "Category tags",
+            "Google Scholar profile",
+        ],
+        index=2,
     )
+
+    selected_categories: list[str] = []
+    user_description = ""
+    scholar_url = ""
+
+    if init_mode == "Natural language description":
+        user_description = st.text_area(
+            "Describe what papers you like",
+            placeholder="Example: I like recent NLP papers on LLM alignment, retrieval-augmented generation, and multilingual evaluation.",
+            height=120,
+        )
+    elif init_mode == "Category tags":
+        st.write("**Pick topics you're interested in:**")
+        selected_categories = topic_selector(index.category_centroids)
+    else:
+        scholar_url = st.text_input(
+            "Google Scholar URL",
+            placeholder="https://scholar.google.com/citations?user=...",
+        )
+        st.caption(
+            "We use top 3 most-cited papers from this profile, then map each paper "
+            "to its nearest arXiv category centroid."
+        )
 
     # -- Diversity slider --
     st.write("**How broad should your daily papers be?**")
@@ -42,7 +72,7 @@ def render_onboarding(index: PaperIndex, db_path: str) -> None:
         "Diversity",
         min_value=0.0,
         max_value=1.0,
-        value=0.5,
+        value=0.0,
         step=0.1,
         help="0 = focused on your strongest interest · 1 = explore broadly",
     )
@@ -51,28 +81,62 @@ def render_onboarding(index: PaperIndex, db_path: str) -> None:
         if not name.strip():
             st.error("Please enter your name.")
             return
-        if not selected_categories:
-            st.error("Please select at least one topic.")
-            return
 
-        # Embed Scholar papers if provided
-        paper_embeddings = None
-        if scholar_url.strip():
-            with st.spinner("Fetching your Scholar profile..."):
-                papers = load_scholar_papers(scholar_url.strip())
-            if papers:
-                with st.spinner("Embedding your papers..."):
-                    model = _get_embed_model()
-                    paper_embeddings = model.embed_papers(papers)
-            else:
-                st.warning("Could not load Scholar profile. "
-                           "Continuing with topics only.")
+        model = _get_embed_model()
+        if init_mode == "Natural language description":
+            if not user_description.strip():
+                st.error("Please describe your paper interests.")
+                return
+            with st.spinner("Embedding your interests..."):
+                desc_embedding = model.embed_batch([user_description.strip()])[0]
+            centroids = init_user_profile_from_description(desc_embedding)
 
-        centroids = init_user_profile(
-            selected_categories,
-            index.category_centroids,
-            paper_embeddings=paper_embeddings,
-        )
+        elif init_mode == "Category tags":
+            if not selected_categories:
+                st.error("Please select at least one topic.")
+                return
+            centroids = init_user_profile_from_topics(
+                selected_categories,
+                index.category_centroids,
+            )
+
+        else:
+            if not scholar_url.strip():
+                st.error("Please enter your Google Scholar URL.")
+                return
+            user_id = parse_scholar_url(scholar_url.strip())
+            if not user_id:
+                st.error("Invalid Google Scholar profile URL.")
+                return
+
+            with st.spinner("Fetching Scholar papers..."):
+                try:
+                    papers, _ = fetch_scholar_papers(
+                        user_id,
+                        max_papers=100,
+                        sort_by_pubdate=False,
+                    )
+                except Exception:
+                    papers = []
+
+            if not papers:
+                st.error("Could not load papers from this Scholar profile.")
+                return
+
+            top3 = sorted(papers, key=lambda p: p.get("citations", 0), reverse=True)[:3]
+            if not top3:
+                st.error("No papers found in the Scholar profile.")
+                return
+
+            with st.spinner("Fetching descriptions for top Scholar papers..."):
+                papers_with_abstract = enrich_scholar_papers_with_descriptions(top3)
+            with st.spinner("Embedding top Scholar papers..."):
+                scholar_embeddings = model.embed_papers(papers_with_abstract)
+            centroids = init_user_profile_from_scholar_top3(
+                scholar_embeddings,
+                index.category_centroids,
+            )
+
         k_u = centroids.shape[0]
         user_id = create_user(name.strip(), centroids, k_u, diversity)
 

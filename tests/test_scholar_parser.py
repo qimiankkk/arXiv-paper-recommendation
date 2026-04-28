@@ -20,6 +20,8 @@ from pipeline.scholar_parser import (
     _extract_profile_name,
     _is_first_author,
     _normalize_last_name,
+    enrich_scholar_papers_with_descriptions,
+    fetch_scholar_paper_description,
     fetch_scholar_papers,
     filter_papers,
     load_scholar_papers,
@@ -243,11 +245,27 @@ class TestFetchScholarPapers:
         assert "sortby=pubdate" in call_url
 
     @patch("pipeline.scholar_parser.requests.get")
+    def test_request_url_without_pubdate_sort(self, mock_get):
+        mock_get.return_value = _mock_response()
+
+        fetch_scholar_papers("testuser", max_papers=20, sort_by_pubdate=False)
+        call_url = mock_get.call_args[0][0]
+        assert "user=testuser" in call_url
+        assert "pagesize=20" in call_url
+        assert "sortby=pubdate" not in call_url
+
+    @patch("pipeline.scholar_parser.requests.get")
     def test_abstract_always_empty(self, mock_get):
         mock_get.return_value = _mock_response()
 
         papers, _ = fetch_scholar_papers("abc123")
         assert all(p["abstract"] == "" for p in papers)
+
+    @patch("pipeline.scholar_parser.requests.get")
+    def test_extracts_detail_url(self, mock_get):
+        mock_get.return_value = _mock_response()
+        papers, _ = fetch_scholar_papers("abc123")
+        assert papers[0]["url"].startswith("https://scholar.google.com")
 
     @patch("pipeline.scholar_parser.requests.get")
     def test_uses_scholar_headers(self, mock_get):
@@ -511,3 +529,34 @@ class TestLiveScholarProfiles:
             assert isinstance(p["citations"], int) and p["citations"] >= 0
             assert isinstance(p["year"], int)
             assert isinstance(p["authors"], str)
+
+
+class TestScholarDescriptions:
+    @patch("pipeline.scholar_parser.requests.get")
+    def test_fetch_scholar_paper_description(self, mock_get):
+        html = """
+        <html><body>
+          <div class="gsc_oci_row">
+            <div class="gsc_oci_field">Description</div>
+            <div class="gsc_oci_value">This is a test abstract.</div>
+          </div>
+        </body></html>
+        """
+        mock_get.return_value = _mock_response(html)
+        desc = fetch_scholar_paper_description("https://scholar.google.com/citations?view_op=view_citation")
+        assert "test abstract" in desc.lower()
+
+    @patch("pipeline.scholar_parser.fetch_scholar_paper_description")
+    def test_enrich_scholar_papers_with_descriptions(self, mock_fetch_desc):
+        mock_fetch_desc.return_value = "Fetched description."
+        papers = [{
+            "title": "T",
+            "authors": "A",
+            "venue": "V",
+            "citations": 10,
+            "year": 2020,
+            "abstract": "",
+            "url": "https://scholar.google.com/citations?view_op=view_citation",
+        }]
+        enriched = enrich_scholar_papers_with_descriptions(papers)
+        assert enriched[0]["abstract"] == "Fetched description."

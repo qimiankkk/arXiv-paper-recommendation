@@ -13,7 +13,13 @@ import streamlit as st
 
 from pipeline.index import PaperIndex
 from recommender.engine import recommend
-from user.db import get_user, get_seen_ids, log_feedback, update_centroids
+from user.db import (
+    get_like_counts_by_centroid,
+    get_user,
+    get_seen_ids,
+    log_feedback,
+    update_centroids,
+)
 from user.profile import apply_feedback
 from user.session import save_centroids_to_session
 from ui.components import paper_card
@@ -30,6 +36,7 @@ def _handle_feedback(
     meta = next((r for r in recs if r["id"] == arxiv_id), None)
     cluster_id = meta["cluster_id"] if meta else 0
     score = meta.get("rec_score", 0.0) if meta else 0.0
+    centroid_idx = meta.get("nearest_centroid_idx") if meta else None
 
     paper_idx = None
     for i, pm in enumerate(index.paper_meta):
@@ -37,7 +44,14 @@ def _handle_feedback(
             paper_idx = i
             break
 
-    log_feedback(user_id, arxiv_id, signal, cluster_id, score)
+    log_feedback(
+        user_id,
+        arxiv_id,
+        signal,
+        cluster_id,
+        score,
+        centroid_idx=centroid_idx,
+    )
 
     if paper_idx is not None:
         paper_emb = index.embeddings[paper_idx]
@@ -75,10 +89,19 @@ def render_daily_feed(index: PaperIndex, db_path: str) -> None:
 
     if "todays_recs" not in st.session_state:
         centroids = st.session_state["user_centroids"]
+        k_u = int(st.session_state.get("user_k_u", centroids.shape[0]))
         diversity = st.session_state["user_diversity"]
         seen_ids = get_seen_ids(user_id)
+        like_counts = get_like_counts_by_centroid(user_id, k_u)
         with st.spinner("Finding your papers..."):
-            recs = recommend(centroids, seen_ids, index, diversity=diversity, n=5)
+            recs = recommend(
+                centroids,
+                seen_ids,
+                index,
+                diversity=diversity,
+                n=5,
+                centroid_like_counts=like_counts,
+            )
         st.session_state["todays_recs"] = recs
 
     if "responded" not in st.session_state:

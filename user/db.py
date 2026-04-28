@@ -56,10 +56,16 @@ def init_db(db_path: str = DB_PATH) -> None:
             arxiv_id   TEXT NOT NULL,
             signal     TEXT NOT NULL,
             cluster_id INTEGER NOT NULL,
+            centroid_idx INTEGER,
             score      REAL NOT NULL,
             created_at TEXT NOT NULL
         )
     """)
+    cols = {
+        row[1] for row in conn.execute("PRAGMA table_info(feedback)").fetchall()
+    }
+    if "centroid_idx" not in cols:
+        conn.execute("ALTER TABLE feedback ADD COLUMN centroid_idx INTEGER")
     conn.commit()
     conn.close()
 
@@ -154,6 +160,7 @@ def log_feedback(
     signal: str,
     cluster_id: int,
     score: float,
+    centroid_idx: int | None = None,
 ) -> None:
     """Log a user feedback event (like/save/skip) to the feedback table.
 
@@ -162,15 +169,16 @@ def log_feedback(
         arxiv_id: The arXiv paper ID.
         signal: One of "like", "save", "skip".
         cluster_id: The cluster ID of the paper.
+        centroid_idx: The matched user centroid index for this recommendation.
         score: The recommendation score at the time of serving.
     """
     now = datetime.now(timezone.utc).isoformat()
 
     conn = _connect()
     conn.execute(
-        "INSERT INTO feedback (user_id, arxiv_id, signal, cluster_id, score, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (user_id, arxiv_id, signal, cluster_id, score, now),
+        "INSERT INTO feedback (user_id, arxiv_id, signal, cluster_id, centroid_idx, score, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (user_id, arxiv_id, signal, cluster_id, centroid_idx, score, now),
     )
     conn.commit()
     conn.close()
@@ -193,3 +201,35 @@ def get_seen_ids(user_id: str) -> set[str]:
     conn.close()
 
     return {row[0] for row in rows}
+
+
+def get_like_counts_by_centroid(user_id: str, k_u: int) -> list[int]:
+    """Return like-counts per user centroid index.
+
+    Args:
+        user_id: The UUID string of the user.
+        k_u: Number of user centroids.
+
+    Returns:
+        A length-k_u list where item i is number of "like" events
+        with centroid_idx=i.
+    """
+    counts = [0 for _ in range(max(0, k_u))]
+    if k_u <= 0:
+        return counts
+
+    conn = _connect()
+    rows = conn.execute(
+        "SELECT centroid_idx, COUNT(*) FROM feedback "
+        "WHERE user_id = ? AND signal = 'like' AND centroid_idx IS NOT NULL "
+        "GROUP BY centroid_idx",
+        (user_id,),
+    ).fetchall()
+    conn.close()
+
+    for centroid_idx, cnt in rows:
+        if centroid_idx is None:
+            continue
+        if 0 <= int(centroid_idx) < k_u:
+            counts[int(centroid_idx)] = int(cnt)
+    return counts
