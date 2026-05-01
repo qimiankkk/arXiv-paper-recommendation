@@ -15,29 +15,6 @@ from user.session import save_centroids_to_session
 from ui.components import loading_spinner_with_message, paper_card
 
 
-QUERY_SEARCH_EXAMPLES = [
-    "retrieval-augmented generation for factual and citation-grounded LLMs",
-    "diffusion models for medical image reconstruction with limited labels",
-    "graph neural networks for molecular property prediction and drug discovery",
-    "reinforcement learning for safe robotic navigation in uncertain environments",
-    "neural operators for weather forecasting and climate downscaling",
-    "multimodal learning across text, image, audio, and video",
-    "privacy-preserving federated learning for distributed healthcare data",
-    "interpretable machine learning for genomics and single-cell data",
-    "AI alignment methods for scalable oversight and reward modeling",
-    "time series forecasting for financial and macroeconomic data",
-    "representation learning for neural population activity and behavior",
-    "efficient transformers for sparse attention and long-context inference",
-    "causal inference for treatment effects in observational healthcare data",
-    "formal verification and program synthesis for code correctness",
-    "autonomous driving perception and planning under uncertainty",
-    "recommender systems balancing personalization, diversity, and fairness",
-    "variational quantum algorithms and quantum machine learning",
-    "speech recognition for noisy multilingual low-resource settings",
-    "optimization methods for sharpness-aware and generalizable deep learning",
-]
-
-
 def _clear_query_search_state() -> None:
     for key in (
         "query_search_input",
@@ -49,12 +26,6 @@ def _clear_query_search_state() -> None:
         "query_search_clear_requested",
     ):
         st.session_state.pop(key, None)
-
-
-def _rotating_search_placeholder() -> str:
-    idx = st.session_state.get("query_search_example_idx", 0)
-    st.session_state["query_search_example_idx"] = idx + 1
-    return QUERY_SEARCH_EXAMPLES[idx % len(QUERY_SEARCH_EXAMPLES)]
 
 
 @st.cache_resource(show_spinner=False)

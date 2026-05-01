@@ -17,5 +17,4 @@ streamlit-cropper>=0.2.2
 
 # --- Research Mode & Transcription ---
 pymupdf>=1.24.0
-streamlit-cropper>=0.2.2
 pillow>=10.0.0

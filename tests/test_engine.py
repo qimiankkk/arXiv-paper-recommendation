@@ -1,46 +1,70 @@
-"""Phase 3 verification script: test recommendation engine (v2 multi-vector)."""
+from types import SimpleNamespace
 
-import sys
-from pathlib import Path
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
-from pipeline.index import PaperIndex
-from recommender.config import DAILY_FEED_SIZE
-from recommender.engine import recommend
 import numpy as np
 
-index = PaperIndex()
-index.load()
+from recommender.config import DAILY_FEED_SIZE
+from recommender.engine import recommend
 
-centroids = np.random.randn(2, 768).astype(np.float32)
-centroids /= np.linalg.norm(centroids, axis=1, keepdims=True)
 
-recs = recommend(
-    centroids, seen_ids=set(), index=index, diversity=0.5, n=DAILY_FEED_SIZE
-)
-for i, r in enumerate(recs):
-    print(f"{i+1}. [{r['id']}] {r['title'][:60]}  score={r['rec_score']:.3f}")
+def _unit_rows(matrix: np.ndarray) -> np.ndarray:
+    return (matrix / np.linalg.norm(matrix, axis=1, keepdims=True)).astype(np.float32)
 
-# Test with diversity=0.0 (more focused)
-recs_focused = recommend(
-    centroids, seen_ids=set(), index=index, diversity=0.0, n=DAILY_FEED_SIZE
-)
-print(f"\nWith diversity=0.0: {len(recs_focused)} papers")
 
-# Test with diversity=1.0 (very broad)
-recs_broad = recommend(
-    centroids, seen_ids=set(), index=index, diversity=1.0, n=DAILY_FEED_SIZE
-)
-print(f"With diversity=1.0: {len(recs_broad)} papers")
+def _fake_index(total_clusters: int = 24, papers_per_cluster: int = 3):
+    angles = np.linspace(0.0, 0.7, total_clusters, dtype=np.float32)
+    centroids = _unit_rows(
+        np.stack([np.cos(angles), np.sin(angles)], axis=1).astype(np.float32)
+    )
 
-# Verify k_u=1 still works (backward compatibility)
-single_centroid = centroids[:1]
-recs_single = recommend(
-    single_centroid, seen_ids=set(), index=index, diversity=0.5, n=DAILY_FEED_SIZE
-)
-print(f"\nWith k_u=1: {len(recs_single)} papers")
-assert len(recs_single) <= DAILY_FEED_SIZE
-print("All tests passed!")
+    embeddings = []
+    cluster_ids = []
+    paper_meta = []
+    for cluster_id, centroid in enumerate(centroids):
+        for paper_i in range(papers_per_cluster):
+            embeddings.append(centroid)
+            cluster_ids.append(cluster_id)
+            paper_id = f"c{cluster_id}-p{paper_i}"
+            paper_meta.append(
+                {
+                    "id": paper_id,
+                    "title": f"Paper {paper_id}",
+                    "abstract": "A useful paper.",
+                    "categories": ["cs.LG"],
+                    "update_date": "2026-01-01",
+                    "cluster_id": cluster_id,
+                }
+            )
+
+    return SimpleNamespace(
+        embeddings=np.asarray(embeddings, dtype=np.float32),
+        cluster_ids=np.asarray(cluster_ids, dtype=np.int32),
+        centroids=centroids,
+        paper_meta=paper_meta,
+    )
+
+
+def test_recommend_returns_daily_feed_from_fake_index():
+    recs = recommend(
+        np.array([[1.0, 0.0]], dtype=np.float32),
+        seen_ids=set(),
+        index=_fake_index(),
+        diversity=0.5,
+        n=DAILY_FEED_SIZE,
+    )
+
+    assert len(recs) == DAILY_FEED_SIZE
+    assert all("rec_score" in rec for rec in recs)
+
+
+def test_recommend_handles_diversity_extremes_and_single_centroid():
+    index = _fake_index()
+    centroids = np.array([[1.0, 0.0], [0.8, 0.2]], dtype=np.float32)
+    centroids = _unit_rows(centroids)
+
+    focused = recommend(centroids, seen_ids=set(), index=index, diversity=0.0)
+    broad = recommend(centroids, seen_ids=set(), index=index, diversity=1.0)
+    single = recommend(centroids[:1], seen_ids=set(), index=index, diversity=0.5)
+
+    assert 0 < len(focused) <= DAILY_FEED_SIZE
+    assert 0 < len(broad) <= DAILY_FEED_SIZE
+    assert 0 < len(single) <= DAILY_FEED_SIZE

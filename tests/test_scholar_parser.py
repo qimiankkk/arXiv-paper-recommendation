@@ -10,6 +10,7 @@ To skip them:
 
 from __future__ import annotations
 
+import os
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -370,6 +371,10 @@ LIVE_PROFILES = [
 
 
 @pytest.mark.live
+@pytest.mark.skipif(
+    os.getenv("RUN_LIVE_SCHOLAR") != "1",
+    reason="Set RUN_LIVE_SCHOLAR=1 to run live Google Scholar tests.",
+)
 class TestLiveScholarProfiles:
     """Integration tests against real Google Scholar profiles.
 

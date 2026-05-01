@@ -1,221 +1,183 @@
-# ArXiv Daily
+# Folio: arXiv Paper Recommendation
 
-A personalized paper recommendation engine & research tool that surfaces 20 arXiv papers daily, tailored to your interests. Built with Streamlit, SPECTER2 embeddings, and a lightweight local stack — no cloud services or external databases required.
+Folio is a local Streamlit app for discovering, saving, searching, and studying arXiv papers. It builds an offline embedding index from arXiv metadata, initializes each user as one or more research-thread vectors, and serves daily recommendations from nearby embedding clusters.
 
-## How It Works
+The app is designed to run without a hosted database or vector service. Data artifacts live under `data/`, user state lives in SQLite, and optional Workspace AI summaries use the OpenAI API when an API key is configured.
 
-### The Core Idea
+The full algorithm pipeline is outlined in detail in []
 
-Your research taste is represented as **multiple 768-dimensional vectors** (research threads) in the same embedding space as every paper in the arXiv corpus (~2M papers). Recommendation is geometric: the system finds papers whose embeddings are closest to any of your research threads. A diversity slider (delta) controls how broadly recommendations spread across your interests.
+## Application Flow
 
-### Algorithm Overview
+1. Onboarding
+   - Users create an account or continue as a guest.
+   - Research interests can come from curated tags, arXiv-backed topic labels, free-text interests, and an optional public Google Scholar profile.
+   - Seeds are grouped into 1-3 user research-thread centroids with `user.profile.init_user_profile_v2`.
 
-The system has two phases: an **offline batch pipeline** that runs once (or nightly), and an **online serving pipeline** that executes per user at delivery time.
+2. Daily Feed
+   - `recommender.engine.recommend` selects nearby clusters, retrieves candidate papers, applies recency scoring, enforces a per-cluster cap, and returns up to 20 papers.
+   - Like, Save, and Skip feedback is logged to SQLite and updates the nearest user centroid with an EMA rule.
+   - Served papers are marked seen so future feeds avoid repeats.
 
-#### 1. Offline Pipeline
+3. Query Search
+   - The search UI embeds a user query with SPECTER2, selects query-near and user-near clusters, and ranks papers with query similarity, user similarity, recency, and lexical evidence.
+   - Search feedback follows the same logging and centroid-update path as the Daily Feed.
 
-1. **Corpus preparation** — The arXiv dataset is loaded from its [Kaggle JSON snapshot](https://www.kaggle.com/datasets/Cornell-University/arxiv). Each record provides an ID, title, abstract, category tags (e.g. `cs.LG`), and date.
-2. **Embedding** — [SPECTER2](https://huggingface.co/allenai/specter2_base), a scientific-text encoder pretrained on citation graphs, encodes each paper's *title + abstract* into a 768-dim vector. All vectors are L2-normalized to unit length, so cosine similarity reduces to a simple dot product.
-3. **Clustering** — MiniBatchKMeans partitions papers into 500 clusters. This acts as a spatial index: instead of scanning all 2M papers at query time, only papers in the nearest clusters are searched.
-4. **Category centroids** — Independently, one centroid per arXiv category label (e.g. `cs.LG`, `cs.CV`) is computed as the normalized mean of all embeddings in that category. These are used for cold-start user initialization.
+4. Workspace
+   - Saved papers appear in the right-side Folders panel.
+   - Papers can be added to the Workspace for synthesis, similar-paper discovery, and concept-map visualization.
+   - Workspace summaries and graph connections are cached under `data/workspace_cache/`.
 
-#### 2. User Personalization
+5. Research Lab
+   - Opens a saved or selected paper PDF, supports clipping snippets, and stores research notes in SQLite.
+   - Notes remain part of Research Lab, not the Folders sidebar.
 
-- **Cold start (multi-vector)** — A new user selects human-readable topics of interest. Each onboarding topic can expand to one or more available arXiv category centroids, and unavailable categories are skipped for the current corpus. Optional concept tags, free-text interests, and Scholar publications add additional seed vectors. Weighted seeds are grouped with threshold-based agglomerative initialization into 1-3 centroids, so `k_u` is inferred from seed geometry instead of the raw number of expanded arXiv categories. Each centroid represents a distinct research thread.
-- **Diversity slider (delta)** — During onboarding the user sets delta (0.0-1.0), which controls how broadly recommendations spread. Lower values focus on the user's strongest interest; higher values explore more broadly.
-- **Feedback loop** — Each like, save, or skip updates only the **nearest centroid** via Exponential Moving Average (EMA):
+6. Profile
+   - Shows account metadata, feedback counts, preferences, and optional embedding-space visualization when diagnostic artifacts are available.
 
-  ```
-  i* = argmax(centroids @ e_paper)
-  centroids[i*] = normalize( (1 - 0.15) * centroids[i*] + 0.15 * w * e_paper )
-  ```
+## Repository Layout
 
-  where `w` = +1.5 (save), +1.0 (like), or -0.3 (skip). Only the closest research thread moves; all others remain unchanged.
-
-#### 3. Online Serving
-
-1. **Cluster selection** — The total cluster budget is `ceil(4 + delta * 8)` (delta=0 gives 4 clusters, delta=1 gives 12). Budget is split evenly across the user's `k_u` centroids. Each centroid selects its top clusters by dot product. Results are deduplicated.
-2. **KNN retrieval** — Brute-force dot-product search within those clusters. Each paper is scored against **all** user centroids; the maximum similarity (nearest research thread) is used. Filtering out previously seen papers, the top 200 candidates are kept.
-3. **Re-ranking** — Adjust scores with a recency bonus: `score = similarity + 0.25 * exp(-age_days / 30)`. Newer papers get a boost.
-4. **Diversity filter** — At most two papers per k-means cluster are selected. When delta > 0.5 and k_u > 1, early slots try to cover each user centroid before filling by score alone. Stop at 20 papers.
-
-Total serving cost: <1 ms on CPU per user.
-
-### Key Parameters
-
-| Parameter | Value | Description |
-|-----------|-------|-------------|
-| N | ~2,000,000 | Papers in the corpus |
-| d | 768 | Embedding dimension (SPECTER2) |
-| k | 500 | Number of k-means clusters |
-| k_u | 1-3 | User research threads (centroids) |
-| delta | 0.0-1.0 | Diversity slider |
-| alpha | 0.15 | EMA learning rate |
-| M | 200 | KNN candidate pool size |
-| n | 20 | Papers served per day |
-
-## Tech Stack
-
-- **Python 3.11+**
-- **Streamlit** — UI and app framework
-- **SPECTER2** (transformers + adapters) — Scientific paper embeddings
-- **scikit-learn** — MiniBatchKMeans clustering, KMeans user profile initialization
-- **NumPy** — KNN search, EMA updates, all linear algebra
-- **SQLite** — User profiles and feedback log (via Python `sqlite3`)
-- **kagglehub** — Dataset download
-- **BeautifulSoup4** — Google Scholar profile scraping
-- **requests** — HTTP client for Scholar and Semantic Scholar API
-
-No Docker. No external vector DB. No cloud services. Everything runs locally with a SQLite file next to the app.
-
-## Project Structure
-
-```
-arXiv-paper-recommendation/
-├── app.py                       # Streamlit entry point
-├── README.md
-├── requirements.txt
-├── .streamlit/config.toml       # Theme + server config
-│
-├── pipeline/
-│   ├── __init__.py
-│   ├── embed.py                 # SPECTER2 embedding wrapper
-│   ├── cluster.py               # k-means + category centroids
-│   ├── index.py                 # In-memory paper index for serving
-│   ├── offline.py               # Orchestrates embed -> cluster -> save
-│   ├── scholar_parser.py        # Google Scholar profile parser
-│   └── runtime.py               # Single-thread runtime guards for NumPy/PyTorch
-│
-├── user/
-│   ├── __init__.py
-│   ├── db.py                    # SQLite schema + CRUD (multi-vector)
-│   ├── profile.py               # Multi-centroid init, nearest-centroid EMA
-│   └── session.py               # Streamlit session state helpers
-│
-├── recommender/
-│   ├── __init__.py
-│   ├── retrieve.py              # delta-aware cluster selection + multi-vector KNN
-│   ├── rerank.py                # Recency boost + delta-aware diversity filter
-│   └── engine.py                # Top-level recommend() function
-│
-├── ui/
-│   ├── __init__.py
-│   ├── components.py            # Reusable Streamlit widgets
-│   ├── onboarding.py            # Topic selection + Scholar import + delta slider
-│   └── daily_feed.py            # 5-paper card view + demo recommend button
-│
-├── data/                        # Local artifacts (created at runtime)
-│   ├── .gitkeep
-│   ├── embeddings.npy           # N x 768 float32
-│   ├── cluster_ids.npy          # N, int32
-│   ├── centroids.npy            # 500 x 768 float32
-│   ├── category_centroids.npy   # Dict of category -> vector
-│   ├── paper_meta.jsonl         # One JSON object per line
-│   └── arxiv_rec.db             # SQLite user database
-│
-└── scripts/
-    ├── run_offline_pipeline.py  # CLI for offline pipeline generation
-    ├── reset_db.py              # Reset local SQLite test data
-    ├── test_db.py               # Quick DB sanity checks
-    └── test_engine.py           # Quick recommendation sanity checks
+```text
+app.py                     Streamlit entry point and page routing
+ai/                        OpenAI-backed Workspace summaries, connections, cache
+pipeline/                  Offline data pipeline, embeddings, clustering, Scholar parser
+recommender/               Daily-feed retrieval, scoring, query search, visualizations
+ui/                        Streamlit pages and reusable widgets
+user/                      SQLite schema, auth/session helpers, profile updates
+scripts/                   Offline pipeline and artifact-generation commands
+diagnostics/               Optional analysis and visualization utilities
+tests/                     Pytest suite with fake indexes and temp databases
+data/                      Runtime artifacts; ignored except data/.gitkeep
+docs/                      Project design notes and reference PDFs
 ```
 
-## Getting Started
+## Data And Runtime Artifacts
 
-### 1. Install dependencies
+The app expects these generated files in `data/`:
+
+- `embeddings.npy`: paper embedding matrix, memory-mapped at startup
+- `cluster_ids.npy`: k-means cluster assignment per paper
+- `centroids.npy`: k-means cluster centroids
+- `category_centroids.npy`: arXiv category seed vectors
+- `paper_meta.jsonl`: metadata aligned row-for-row with `embeddings.npy`
+- `concept_embeddings.npy` and `concept_embeddings_meta.json`: optional curated concept-tag embeddings
+- `joke_embeddings.npy` and `joke_embeddings_meta.json`: optional loading-message embeddings
+- `arxiv_rec.db`: local SQLite users, feedback, seen papers, and Research Lab notes
+
+Generated artifacts are intentionally ignored by git. Keep only `data/.gitkeep` tracked.
+
+## Setup
+
+Install dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. Set up the OpenAI API key
-
-The Workspace summarization feature expects an OpenAI API key in:
-
-```text
-.streamlit/secrets.toml
-```
-
-The API key is provided separately in the submission notes.
-
-To create the secrets file from the included template, run:
-
-```powershell
-Copy-Item .streamlit\secrets.example.toml .streamlit\secrets.toml
-```
-
-Then open `.streamlit/secrets.toml` and replace the placeholder:
+Optional Workspace AI features need `.streamlit/secrets.toml`:
 
 ```toml
 OPENAI_API_KEY = "paste-your-openai-api-key-here"
 OPENAI_SUMMARY_MODEL = "gpt-5.4-mini"
+OPENAI_CONNECTION_MODEL = "gpt-5.4-mini"
 ```
 
-Restart Streamlit after editing the file. The real `.streamlit/secrets.toml`
-file is ignored by git.
+The app can still run without an API key, but Workspace summary and connection generation will be unavailable.
 
-### 3. Run the offline pipeline
+## Build The Paper Index
 
-This downloads the full arXiv dataset first, then samples/filters papers, embeds them, and clusters them. Use `--limit` for faster dev iterations:
+Run a development-sized offline pipeline:
 
 ```bash
-# Development (fast, ~5 min on CPU)
-python scripts/run_offline_pipeline.py --limit 50000
-
-# Development with deterministic random sampling (same seed => same paper set)
 python scripts/run_offline_pipeline.py --limit 50000 --seed 42
+```
 
-# Category-constrained sampling (supports top-level categories like cs/math/qfin)
-python scripts/run_offline_pipeline.py --limit 50000 --categories cs,math,qfin --seed 42
+Useful options:
 
-# Category-constrained sampling by sub-categories (also supported)
+```bash
 python scripts/run_offline_pipeline.py --limit 50000 --categories cs.LG,cs.CV --seed 42
+python scripts/run_offline_pipeline.py --limit 50000 --run-pca-viz
+python scripts/run_offline_pipeline.py --limit 50000 --run-umap-viz
+python scripts/build_concept_embeddings.py
+python scripts/build_joke_embeddings.py
+```
 
-# Optional: use a CN Hugging Face mirror (default remains huggingface.co)
-python scripts/run_offline_pipeline.py --limit 50000 --hf-endpoint https://hf-mirror.com --disable-hf-transfer
+The full arXiv corpus is much larger and can take hours depending on hardware:
 
-# Full dataset (~4 hours on GPU, overnight on CPU)
+```bash
 python scripts/run_offline_pipeline.py
 ```
-<!--  -->
-### 4. Launch the app
+
+## Run The App
 
 ```bash
 streamlit run app.py
 ```
 
-Visit `http://localhost:8501`, pick your topics, optionally paste a Google Scholar URL, set your diversity preference, and start reading.
+Open `http://localhost:8501`.
+
+If the app reports missing data, build the offline artifacts first.
+
+## Recommendation Logic
+
+Daily recommendations use a bounded retrieval pipeline:
+
+1. Compute a diversity-controlled cluster budget from the user's exploration setting.
+2. Split cluster selection across the user's research-thread centroids.
+3. Retrieve top candidates inside selected clusters with dot-product similarity.
+4. Score candidates with raw similarity plus a recency bonus from `recommender.scoring`.
+5. Enforce no repeats and at most two papers per k-means cluster.
+6. If the first pass underfills, expand to a bounded set of nearby clusters rather than scanning the full index.
+
+Feedback updates only the nearest user centroid:
+
+```text
+updated = normalize((1 - alpha) * centroid + alpha * feedback_weight * paper_embedding)
+```
+
+Default weights are `save=1.5`, `like=1.0`, and `skip=-0.3`.
+
+## Query Search Logic
+
+Query search is separate from the Daily Feed. It expands short queries into paper-like scientific retrieval text, embeds the query, searches query-near and user-near clusters, and ranks a candidate pool with:
+
+- query similarity
+- user-profile similarity
+- recency
+- lightweight lexical evidence from title and abstract
+
+Results include debug fields such as `query_similarity`, `user_similarity`, `recency_score`, `lexical_score`, and `nearest_user_thread`.
+
+## Testing
+
+Run focused cleanup checks:
+
+```bash
+pytest tests/test_query_search.py
+pytest tests/test_daily_feed_expansion.py
+pytest tests/test_db.py
+pytest tests/test_engine.py
+pytest tests/test_scholar_parser.py
+pytest tests/test_onboarding_topics.py
+```
+
+Run the normal non-network, non-embedding suite:
+
+```bash
+pytest tests -m "not embedding and not slow and not live"
+```
 
 
-### Reset test data (for testing use)
+Embedding and live Scholar diagnostics are marked separately because they require large local model artifacts or network access:
 
-To clear local user/test data and recreate an empty DB schema:
+```bash
+pytest -m embedding
+pytest -m live
+```
+
+## Reset Local User Data
 
 ```bash
 python scripts/reset_db.py
 ```
 
-### Evaluation figures
-
-Generate presentation-ready evaluation tables and plots from JSON artifacts:
-
-```bash
-python scripts/plot_evaluation_results.py \
-  --query-aggregate evaluation/data/query_aggregate_metrics_combined_ev1_ev120.json \
-  --out-dir reports/eval_figures
-```
-
-For full query evaluation figures, also provide `--query-scores` for the
-relevance-by-rank curve and `--query-baseline-comparison` for baseline
-comparison plots. Later daily-feed experiments can add
-`--daily-variant-metrics` and `--diversity-sweep`.
-
-Query-only aggregate runs produce:
-
-- `headline_metrics_table.csv`
-- `headline_metrics_table.png`
-- `query_search_case_metrics.png`
-
-Additional inputs produce optional files such as
-`query_relevance_by_rank.csv/png`, query baseline comparison PNGs,
-`daily_feed_variant_comparison.png`, and `diversity_index_sweep.png`.
+This recreates `data/arxiv_rec.db` and does not rebuild embeddings or metadata.
