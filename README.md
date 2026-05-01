@@ -32,6 +32,20 @@ The app is designed to run without a hosted database or vector service. Data art
 6. Profile
    - Shows account metadata, feedback counts, preferences, and optional embedding-space visualization when diagnostic artifacts are available.
 
+## Embedding Visualization
+
+Folio can project the paper index into a 2D UMAP view and overlay user centroids, making it easier to inspect where a user's research threads sit inside the broader paper space.
+
+![User embedding visualization](docs/media/user-embedding-visualization.png)
+
+## Optional AI Implementation
+
+Workspace AI is optional. When an OpenAI API key is configured, saved workspace papers can be synthesized into a structured summary and a connection graph. Outputs are cached under `data/workspace_cache/` so repeated views do not regenerate the same analysis.
+
+![AI workspace summary](docs/media/ai-workspace-summary.png)
+
+![AI connections graph](docs/media/ai-connections-graph.png)
+
 ## Repository Layout
 
 ```text
