@@ -15,9 +15,12 @@ import numpy as np
 from pipeline.index import PaperIndex
 from recommender.config import (
     DAILY_CANDIDATE_POOL_SIZE,
+    DAILY_CENTROID_COVERAGE_WEIGHT,
+    DAILY_CLUSTER_SATURATION_WEIGHT,
     DAILY_FEED_SIZE,
     DAILY_MAX_PER_CLUSTER,
 )
+from recommender.diversity import clamp_diversity
 from recommender.retrieve import find_nearest_clusters, knn_in_clusters
 from recommender.rerank import paper_age_days, recency_score
 
@@ -123,15 +126,16 @@ def _score_candidates(
     scored: list[tuple[float, dict, int]] = []
     for sim_score, meta, nearest_ci in candidates:
         recency = recency_score(meta.get("update_date", ""))
-        final = sim_score + recency_weight * recency
+        base_score = sim_score + recency_weight * recency
         enriched_meta = dict(meta)
-        enriched_meta["rec_score"] = final
-        enriched_meta["final_score"] = final
+        enriched_meta["rec_score"] = base_score
+        enriched_meta["final_score"] = base_score
+        enriched_meta["base_score"] = base_score
         enriched_meta["raw_similarity"] = float(sim_score)
         enriched_meta["recency_score"] = float(recency)
         enriched_meta["nearest_centroid_id"] = int(nearest_ci)
         enriched_meta["age_days"] = paper_age_days(meta.get("update_date", ""))
-        scored.append((final, enriched_meta, nearest_ci))
+        scored.append((base_score, enriched_meta, nearest_ci))
     scored.sort(key=lambda x: x[0], reverse=True)
     return scored
 
@@ -157,6 +161,7 @@ def _append_candidate(
     selected_ids: set[str],
     cluster_counts: Counter,
     covered_centroids: set[int],
+    thread_counts: Counter,
     meta: dict,
     nearest_ci: int,
 ) -> None:
@@ -166,6 +171,28 @@ def _append_candidate(
         selected_ids.add(pid)
     cluster_counts[meta.get("cluster_id")] += 1
     covered_centroids.add(nearest_ci)
+    thread_counts[nearest_ci] += 1
+
+
+def _diversity_adjusted_score(
+    base_score: float,
+    meta: dict,
+    nearest_ci: int,
+    diversity: float,
+    thread_counts: Counter,
+    cluster_counts: Counter,
+    max_per_cluster: int,
+) -> tuple[float, float, float]:
+    """Score a candidate using centroid coverage and cluster saturation."""
+    coverage_bonus = 1.0 / (1.0 + thread_counts[nearest_ci])
+    cluster_id = meta.get("cluster_id")
+    saturation = cluster_counts[cluster_id] / max_per_cluster
+    adjusted_score = (
+        base_score
+        + diversity * DAILY_CENTROID_COVERAGE_WEIGHT * coverage_bonus
+        - diversity * DAILY_CLUSTER_SATURATION_WEIGHT * saturation
+    )
+    return adjusted_score, coverage_bonus, saturation
 
 
 def select_with_relaxation(
@@ -175,68 +202,68 @@ def select_with_relaxation(
     n: int = TARGET_RECOMMENDATIONS,
     seen_ids: set[str] | None = None,
 ) -> tuple[list[dict], int, int]:
-    """Select recommendations with early centroid coverage and cluster caps."""
+    """Select recommendations with delta-weighted centroid coverage."""
     seen_ids = seen_ids or set()
+    diversity = clamp_diversity(diversity)
     scored = _score_candidates(candidates)
 
     selected: list[dict] = []
     selected_ids: set[str] = set()
     cluster_counts: Counter = Counter()
+    thread_counts: Counter = Counter()
     covered_centroids: set[int] = set()
 
-    if diversity > 0.5 and k_u > 1:
-        early_slots = min(k_u, n)
-        while len(selected) < early_slots and len(covered_centroids) < k_u:
-            best: tuple[float, dict, int] | None = None
-            for score, meta, nearest_ci in scored:
-                if nearest_ci in covered_centroids:
-                    continue
-                if not _candidate_is_available(
-                    meta,
-                    seen_ids,
-                    selected_ids,
-                    cluster_counts,
-                    DAILY_MAX_PER_CLUSTER,
-                ):
-                    continue
-                best = (score, meta, nearest_ci)
-                break
-            if best is None:
-                break
-            _score, meta, nearest_ci = best
-            _append_candidate(
-                selected,
+    while len(selected) < n:
+        best: tuple[float, float, float, dict, int] | None = None
+        for base_score, meta, nearest_ci in scored:
+            if not _candidate_is_available(
+                meta,
+                seen_ids,
                 selected_ids,
                 cluster_counts,
-                covered_centroids,
-                meta,
-                nearest_ci,
+                DAILY_MAX_PER_CLUSTER,
+            ):
+                continue
+            adjusted_score, coverage_bonus, saturation = _diversity_adjusted_score(
+                base_score=base_score,
+                meta=meta,
+                nearest_ci=nearest_ci,
+                diversity=diversity,
+                thread_counts=thread_counts,
+                cluster_counts=cluster_counts,
+                max_per_cluster=DAILY_MAX_PER_CLUSTER,
             )
+            if best is None or adjusted_score > best[0]:
+                best = (
+                    adjusted_score,
+                    coverage_bonus,
+                    saturation,
+                    meta,
+                    nearest_ci,
+                )
 
-    early_coverage_count = len(selected)
+        if best is None:
+            break
 
-    for _score, meta, nearest_ci in scored:
-        if not _candidate_is_available(
-            meta,
-            seen_ids,
-            selected_ids,
-            cluster_counts,
-            DAILY_MAX_PER_CLUSTER,
-        ):
-            continue
+        adjusted_score, coverage_bonus, saturation, meta, nearest_ci = best
+        selected_meta = dict(meta)
+        selected_meta["final_score"] = float(adjusted_score)
+        selected_meta["rec_score"] = float(adjusted_score)
+        selected_meta["diversity_adjusted_score"] = float(adjusted_score)
+        selected_meta["centroid_coverage_bonus"] = float(coverage_bonus)
+        selected_meta["cluster_saturation_penalty"] = float(saturation)
 
         _append_candidate(
             selected,
             selected_ids,
             cluster_counts,
             covered_centroids,
-            meta,
+            thread_counts,
+            selected_meta,
             nearest_ci,
         )
-        if len(selected) >= n:
-            break
 
-    return selected[:n], early_coverage_count, len(selected)
+    return selected[:n], len(covered_centroids), len(selected)
 
 
 def _dedupe_candidates(
@@ -282,6 +309,7 @@ def recommend(
     Returns:
         List of up to n paper_meta dicts with "rec_score" added.
     """
+    diversity = clamp_diversity(diversity)
     k_u = user_centroids.shape[0]
 
     # 1. Cluster selection (δ controls budget)

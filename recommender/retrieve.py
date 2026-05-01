@@ -21,6 +21,7 @@ from recommender.config import (
     DAILY_CLUSTER_BUDGET_BASE,
     DAILY_CLUSTER_BUDGET_DIVERSITY_MULTIPLIER,
 )
+from recommender.diversity import clamp_diversity
 
 
 def _is_withdrawn_paper(meta: dict) -> bool:
@@ -60,6 +61,7 @@ def find_nearest_clusters(
     Returns:
         Deduplicated list of cluster indices to search.
     """
+    diversity = clamp_diversity(diversity)
     total_budget = math.ceil(
         DAILY_CLUSTER_BUDGET_BASE
         + diversity * DAILY_CLUSTER_BUDGET_DIVERSITY_MULTIPLIER

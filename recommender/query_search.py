@@ -15,6 +15,7 @@ from datetime import datetime
 import numpy as np
 
 from pipeline.index import PaperIndex
+from recommender.diversity import clamp_diversity
 from recommender.retrieve import _is_withdrawn_paper
 from recommender.rerank import recency_score
 
@@ -133,6 +134,7 @@ def select_user_clusters(
     """Return user-profile clusters with a diversity-controlled budget."""
     if max_budget <= 0 or user_centroids.size == 0:
         return []
+    diversity = clamp_diversity(diversity)
     budget = min(math.ceil(2 + 4 * diversity), max_budget)
     user_centroids = _normalize_rows(user_centroids)
     sims = np.asarray(index_centroids) @ user_centroids.T
@@ -185,6 +187,7 @@ def search_papers(
     weighted sum is computed.
     """
     seen_ids = seen_ids or set()
+    diversity = clamp_diversity(diversity)
     query_embedding = _normalize_vector(query_embedding)
     user_centroids = _normalize_rows(user_centroids)
 

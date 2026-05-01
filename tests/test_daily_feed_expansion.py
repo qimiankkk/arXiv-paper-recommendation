@@ -100,6 +100,16 @@ def test_cluster_budget_follows_daily_formula_for_single_centroid():
     assert len(find_nearest_clusters(user_centroids, index_centroids, 1.0)) == 12
 
 
+def test_cluster_budget_clamps_out_of_range_diversity_values():
+    user_centroids = np.array([[1.0, 0.0]], dtype=np.float32)
+    index_centroids = np.stack(
+        [np.array([1.0 - i * 0.01, 0.0], dtype=np.float32) for i in range(20)]
+    )
+
+    assert len(find_nearest_clusters(user_centroids, index_centroids, -1.0)) == 4
+    assert len(find_nearest_clusters(user_centroids, index_centroids, 2.0)) == 12
+
+
 def test_final_feed_never_has_more_than_two_papers_per_kmeans_cluster():
     candidates = [
         _candidate(f"p{i}", cluster_id=i // 3, score=1.0 - i * 0.001)
@@ -119,27 +129,42 @@ def test_final_feed_never_has_more_than_two_papers_per_kmeans_cluster():
     assert max(counts.values()) <= DAILY_MAX_PER_CLUSTER
 
 
-def test_high_diversity_users_get_early_centroid_coverage_when_possible():
+def test_delta_zero_keeps_base_score_order_when_clusters_allow_it():
     candidates = [
         _candidate("c0-best", 0, 1.0, nearest_centroid=0),
-        _candidate("c0-second", 1, 0.99, nearest_centroid=0),
-        _candidate("c1-best", 2, 0.80, nearest_centroid=1),
-        _candidate("c2-best", 3, 0.70, nearest_centroid=2),
+        _candidate("c1-second", 1, 0.95, nearest_centroid=1),
+        _candidate("c2-third", 2, 0.90, nearest_centroid=2),
     ]
-    candidates.extend(
-        _candidate(f"fill-{i}", 4 + i // 2, 0.60 - i * 0.001, nearest_centroid=0)
-        for i in range(40)
-    )
 
-    recs, _early, _selected = engine.select_with_relaxation(
+    recs, _covered, _selected = engine.select_with_relaxation(
         candidates,
         k_u=3,
-        diversity=0.9,
-        n=DAILY_FEED_SIZE,
+        diversity=0.0,
+        n=3,
         seen_ids=set(),
     )
 
-    assert {rec["nearest_centroid_id"] for rec in recs[:3]} == {0, 1, 2}
+    assert [rec["id"] for rec in recs] == ["c0-best", "c1-second", "c2-third"]
+
+
+def test_high_diversity_promotes_undercovered_centroids_when_scores_are_close():
+    candidates = [
+        _candidate("c0-best", 0, 1.0, nearest_centroid=0),
+        _candidate("c0-second", 1, 0.98, nearest_centroid=0),
+        _candidate("c1-best", 2, 0.95, nearest_centroid=1),
+        _candidate("c2-best", 3, 0.94, nearest_centroid=2),
+    ]
+
+    recs, _covered, _selected = engine.select_with_relaxation(
+        candidates,
+        k_u=3,
+        diversity=1.0,
+        n=3,
+        seen_ids=set(),
+    )
+
+    assert [rec["id"] for rec in recs] == ["c0-best", "c1-best", "c2-best"]
+    assert {rec["nearest_centroid_id"] for rec in recs} == {0, 1, 2}
 
 
 def test_seen_papers_are_excluded_and_served_papers_are_marked_seen(tmp_path):
@@ -187,6 +212,10 @@ def test_debug_metadata_is_added_to_served_papers():
     rec = recs[0]
     assert rec["final_score"] == rec["rec_score"]
     assert rec["raw_similarity"] == 0.75
+    assert "base_score" in rec
+    assert "diversity_adjusted_score" in rec
+    assert "centroid_coverage_bonus" in rec
+    assert "cluster_saturation_penalty" in rec
     assert "recency_score" in rec
     assert rec["cluster_id"] == 3
     assert rec["nearest_centroid_id"] == 2
