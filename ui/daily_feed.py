@@ -8,7 +8,7 @@ and persisting the updated centroids.
 from __future__ import annotations
 
 import json
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 from functools import partial
 

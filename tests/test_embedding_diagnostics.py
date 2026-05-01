@@ -27,7 +27,6 @@ from tests.test_profile_v2_pipeline import (
     DATA_DIR,
     _unit_rows,
     assert_unit_norm_rows,
-    load_concept_embeddings_or_skip,
 )
 
 

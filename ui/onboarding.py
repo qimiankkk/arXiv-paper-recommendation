@@ -1,7 +1,7 @@
 """Onboarding page: account setup, profile picture, and research interests."""
 
 from __future__ import annotations
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 import numpy as np
 import streamlit as st
@@ -12,7 +12,6 @@ from pipeline.index import PaperIndex
 from pipeline.interest_expander import embed_free_text_interests
 from pipeline.scholar_parser import load_scholar_papers
 from ui.components import (
-    MAX_ONBOARDING_TAGS,
     TOPIC_LABELS,
     expand_topic_labels,
     free_text_input,
@@ -44,7 +43,7 @@ def make_category_seeds_from_topic_labels(
     """Build category seeds from human-readable onboarding labels."""
     topic_keys = expand_topic_labels(selected_labels, TOPIC_LABELS, category_centroids)
     if selected_labels and not topic_keys:
-        raise ValueError("Selected topics are not available in current centroids.")
+        raise ValueError("selected onboarding topics are not available in current centroids.")
 
     seeds: list[SeedSignal] = []
     for code in topic_keys:
@@ -200,6 +199,28 @@ def render_step_two(index: PaperIndex, db_path: str) -> None:
                     model = _get_embed_model()
                     for phrase, emb in embed_free_text_interests(free_texts, model):
                         seeds.append(make_freetext_seed(phrase, emb))
+
+            scholar_url = scholar_url.strip()
+            if scholar_url:
+                with loading_spinner_with_message():
+                    scholar_papers = load_scholar_papers(scholar_url)
+                    if scholar_papers:
+                        model = _get_embed_model()
+                        scholar_embeddings = model.embed_papers(scholar_papers)
+                        for paper, emb in zip(scholar_papers, scholar_embeddings):
+                            title = paper.get("title") or "Scholar paper"
+                            seeds.append(make_scholar_seed(title, emb))
+
+                if not scholar_papers:
+                    message = (
+                        "Could not load papers from that Google Scholar profile. "
+                        "Check that the URL points to a public profile."
+                    )
+                    if seeds:
+                        st.warning(message + " Continuing with your other interests.")
+                    else:
+                        st.error(message)
+                        return
             
             if not seeds:
                 st.error("Please select at least one research interest.")
