@@ -4,6 +4,8 @@ Folio is a local Streamlit app for discovering, saving, searching, and studying 
 
 The app is designed to run without a hosted database or vector service. Data artifacts live under `data/`, user state lives in SQLite, and optional Workspace AI summaries use the OpenAI API when an API key is configured.
 
+The full algorithm pipeline is outlined in detail in []
+
 ## Application Flow
 
 1. Onboarding
