@@ -1,6 +1,9 @@
 # Generated data artifacts
 data/*
 !data/.gitkeep
+evaluation/data/*
+evaluation/figures/*
+
 
 # Python
 __pycache__/
