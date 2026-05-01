@@ -164,12 +164,6 @@ Run the normal non-network, non-embedding suite:
 pytest tests -m "not embedding and not slow and not live"
 ```
 
-Run static sanity:
-
-```bash
-python -m compileall -q app.py ai pipeline recommender ui user scripts
-rg "<removed rerank module or selector name>" app.py ai pipeline recommender ui user tests scripts
-```
 
 Embedding and live Scholar diagnostics are marked separately because they require large local model artifacts or network access:
 
