@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from functools import partial
+
 import streamlit as st
 
 from pipeline.embed import EmbeddingModel
