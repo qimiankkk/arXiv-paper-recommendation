@@ -224,24 +224,6 @@ def expand_topic_labels(
 
     return expanded
 
-def on_like(arxiv_id):
-    liked = set(st.session_state.get("liked", set()))
-    liked.add(arxiv_id)
-    st.session_state["liked"] = liked
-    st.rerun()
-
-def on_save(arxiv_id):
-    saved = set(st.session_state.get("saved", set()))
-    saved.add(arxiv_id)
-    st.session_state["saved"] = saved
-    st.rerun()
-
-def on_skip(arxiv_id):
-    skipped = set(st.session_state.get("skipped", set()))
-    skipped.add(arxiv_id)
-    st.session_state["skipped"] = skipped
-    st.rerun()
-
 def paper_card(
     meta: dict,
     on_like: Callable[[str], None],

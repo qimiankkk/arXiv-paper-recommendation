@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from collections import Counter
+from pathlib import Path
 from types import SimpleNamespace
+from uuid import uuid4
 
 import numpy as np
 
@@ -142,37 +144,42 @@ def test_high_diversity_users_get_early_centroid_coverage_when_possible():
     assert {rec["nearest_centroid_id"] for rec in recs[:3]} == {0, 1, 2}
 
 
-def test_seen_papers_are_excluded_and_served_papers_are_marked_seen(tmp_path):
-    db_path = str(tmp_path / "seen.db")
+def test_seen_papers_are_excluded_and_served_papers_are_marked_seen():
+    db_file = Path("data") / f"test_seen_{uuid4().hex}.db"
+    db_file.parent.mkdir(parents=True, exist_ok=True)
+    db_path = str(db_file)
     init_db(db_path)
-    centroids = np.stack(
-        [
-            _unit(np.arange(1, 769, dtype=np.float32)),
+    try:
+        centroids = np.stack(
+            [
+                _unit(np.arange(1, 769, dtype=np.float32)),
+            ]
+        )
+        uid = create_user("Daily User", centroids, k_u=1)
+
+        mark_papers_seen(uid, ["served-final", "served-final"])
+        log_feedback(uid, "liked-paper", "like", cluster_id=1, score=0.9)
+        log_feedback(uid, "liked-paper", "like", cluster_id=1, score=0.9)
+
+        assert get_seen_ids(uid) == {"served-final", "liked-paper"}
+        assert get_feedback_counts(uid) == {"like": 2, "save": 0, "skip": 0}
+        assert get_interacted_paper_count(uid) == 1
+
+        candidates = [
+            _candidate("served-final", 0, 1.0),
+            _candidate("fresh-paper", 1, 0.9),
         ]
-    )
-    uid = create_user("Daily User", centroids, k_u=1)
+        recs, _early, _selected = engine.select_with_relaxation(
+            candidates,
+            k_u=1,
+            diversity=0.5,
+            n=DAILY_FEED_SIZE,
+            seen_ids=get_seen_ids(uid),
+        )
 
-    mark_papers_seen(uid, ["served-final", "served-final"])
-    log_feedback(uid, "liked-paper", "like", cluster_id=1, score=0.9)
-    log_feedback(uid, "liked-paper", "like", cluster_id=1, score=0.9)
-
-    assert get_seen_ids(uid) == {"served-final", "liked-paper"}
-    assert get_feedback_counts(uid) == {"like": 2, "save": 0, "skip": 0}
-    assert get_interacted_paper_count(uid) == 1
-
-    candidates = [
-        _candidate("served-final", 0, 1.0),
-        _candidate("fresh-paper", 1, 0.9),
-    ]
-    recs, _early, _selected = engine.select_with_relaxation(
-        candidates,
-        k_u=1,
-        diversity=0.5,
-        n=DAILY_FEED_SIZE,
-        seen_ids=get_seen_ids(uid),
-    )
-
-    assert [rec["id"] for rec in recs] == ["fresh-paper"]
+        assert [rec["id"] for rec in recs] == ["fresh-paper"]
+    finally:
+        db_file.unlink(missing_ok=True)
 
 
 def test_debug_metadata_is_added_to_served_papers():

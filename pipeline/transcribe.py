@@ -1,7 +1,6 @@
 import streamlit as st
 import requests
 import os
-import fitz  # PyMuPDF
 
 def download_pdf(arxiv_id, data_dir="data/temp_pdfs"):
     """
@@ -26,15 +25,3 @@ def download_pdf(arxiv_id, data_dir="data/temp_pdfs"):
             return None
             
     return pdf_path
-
-def snag_and_drop_router(arxiv_id, page_num, bbox=None):
-    """
-    The backend for the 'Frantic Snag' mode.
-    Currently just a pass-through for the UI to get the PDF path.
-    """
-    pdf_path = download_pdf(arxiv_id)
-    return pdf_path
-
-# Keep this for backward compatibility with your main app routing if needed
-def get_paper_markdown(arxiv_id, use_mock=True):
-    return f"# Researching {arxiv_id}\nUse Snag Mode to clip images."

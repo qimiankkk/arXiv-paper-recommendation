@@ -19,7 +19,7 @@ from recommender.config import (
     DAILY_MAX_PER_CLUSTER,
 )
 from recommender.retrieve import find_nearest_clusters, knn_in_clusters
-from recommender.rerank import paper_age_days, recency_score
+from recommender.scoring import paper_age_days, recency_score
 
 
 logger = logging.getLogger(__name__)

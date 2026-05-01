@@ -16,7 +16,7 @@ import numpy as np
 
 from pipeline.index import PaperIndex
 from recommender.retrieve import _is_withdrawn_paper
-from recommender.rerank import recency_score
+from recommender.scoring import recency_score
 
 
 QUERY_CLUSTER_BUDGET = 10

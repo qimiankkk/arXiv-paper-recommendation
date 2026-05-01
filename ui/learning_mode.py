@@ -158,11 +158,6 @@ def _open_in_research_mode(
     st.rerun()
 
 
-def _render_workspace_action(label: str, key: str):
-    if st.button(label, key=key, width="stretch"):
-        st.info(f"{label.title()} will be connected to the workspace AI tools.")
-
-
 def _paper_index_by_id(index: PaperIndex, arxiv_id: str) -> int | None:
     for i, meta in enumerate(index.paper_meta):
         if meta.get("id") == arxiv_id:
@@ -850,9 +845,6 @@ def _render_right_sidebar(saved_papers, active_tab: str):
                 for row_index, paper in enumerate(saved_papers):
                     _render_saved_paper_row(paper, active_tab, row_index)
                     st.divider()
-
-        with st.expander("Notes (0)", expanded=True):
-            st.caption("No notes yet.")
 
 
 def render_learning_mode(index):

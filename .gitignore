@@ -15,6 +15,7 @@ tmp_pytest_run/
 tmp_pytest_run*/
 codex_tmp_see_more_test/
 pytest-cache-files-*/
+.codex_pytest_tmp/
 
 # Environment
 .env

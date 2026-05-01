@@ -45,13 +45,6 @@ def _paper_index_by_id(index: PaperIndex, arxiv_id: str) -> int | None:
     return None
 
 
-def _short_title(title: str, max_words: int = 2) -> str:
-    words = " ".join(str(title or "").split()).split()
-    if not words:
-        return "Paper"
-    return " ".join(words[:max_words])
-
-
 def _paper_letter(index: int) -> str:
     if index < len(PAPER_LABEL_ALPHABET):
         return PAPER_LABEL_ALPHABET[index]
