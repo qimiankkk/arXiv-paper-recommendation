@@ -149,7 +149,7 @@ else:
             width:100%;
         ">
             <div style="font-size:4rem;">&#129489;</div>
-            <div style="font-weight:600; margin-top:8px; font-size:5rem;">
+            <div style="font-weight:600; margin-top:8px; font-size:3rem;">
                 {user_data['display_name']}
             </div>
         </div>

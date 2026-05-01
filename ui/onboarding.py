@@ -1,6 +1,7 @@
 """Onboarding page: account setup, profile picture, and research interests."""
 
 from __future__ import annotations
+from datetime import date, datetime
 from pathlib import Path
 import numpy as np
 import streamlit as st
@@ -63,18 +64,28 @@ def render_onboarding(index: PaperIndex, db_path: str) -> None:
 
 def render_step_one() -> None:
     """Step 1: Account setup and binary-safe avatar selection."""
-    st.title("ArXiv Daily")
-    st.write("Personalized paper recommendations from arXiv, delivered daily.")
+    st.title("Folio")
+    st.write("Your personal & personalized research tool.")
     st.divider()
 
     if "auth_mode" not in st.session_state:
         st.session_state["auth_mode"] = None
 
     mode = st.session_state["auth_mode"]
+    hour = datetime.now().hour
+
+    if 5 <= hour < 12:
+        greeting = "Good morning! Let's get you started."
+    elif 12 <= hour < 18:
+        greeting = "Good afternoon! Let's get you started."
+    elif 18 <= hour < 22:
+        greeting = "Good evening! Let's get you started."
+    else:
+        greeting = "Hey there, night owl. Let's get you started."
 
     # Welcome / Mode Selection [cite: 3352, 4901]
     if mode is None:
-        st.subheader("Welcome")
+        st.subheader(greeting)
         col1, col2, col3 = st.columns(3)
         with col1:
             if st.button("Log in", use_container_width=True):
@@ -120,7 +131,6 @@ def render_step_one() -> None:
         username, password, confirm_password = "", "", ""
         name = st.text_input("Your name", placeholder="Enter your display name")
 
-    st.write("### Choose your profile picture")
     if "selected_avatar" not in st.session_state:
         st.session_state["selected_avatar"] = AVATARS[0]
 
