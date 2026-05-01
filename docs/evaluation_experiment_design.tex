@@ -1,0 +1,675 @@
+
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath, amssymb}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{array}
+\usepackage{longtable}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    urlcolor=blue,
+    citecolor=blue
+}
+
+\title{\textbf{Evaluation Experiment Design}\\
+\large Query Search and Daily Feed Algorithms}
+\author{ArXiv Recommendation System}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\section{Evaluation Goals}
+
+The evaluation has two goals.
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Quantify current algorithm performance.} We report top-$K$ metrics at $K=20$ for both the Query Search algorithm and the Daily Feed algorithm.
+    \item \textbf{Validate key design choices through controlled comparisons.} In particular, we evaluate whether personalization improves query search, whether multi-centroid user profiles improve daily feed quality, and whether the explicit diversity index improves thread coverage without severely reducing relevance.
+\end{enumerate}
+
+The evaluation is not intended to claim global optimality of any parameter setting. Instead, it provides a reproducible, quantitative measurement of the current system and a controlled comparison against simple baselines.
+
+\section{Shared Evaluation Protocol}
+
+Both algorithms are evaluated at:
+
+\[
+K = 20.
+\]
+
+For each evaluation case, the system returns a ranked list of 20 papers. A strong LLM judge assigns structured per-paper scores on a $0/1/2$ scale. These per-paper scores are then aggregated into top-$K$ metrics.
+
+The shared reported metrics are:
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Strict Precision@20}
+    \item \textbf{Soft Precision@20}
+    \item \textbf{Mean Relevance@20}
+    \item \textbf{NDCG@20}
+\end{itemize}
+
+For Daily Feed, we additionally report explicit diversity metrics:
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Thread Coverage@20}
+    \item \textbf{Redundancy@20}
+    \item \textbf{Diversity Alignment}
+\end{itemize}
+
+Diversity is not evaluated for Query Search. Query Search is treated as an explicit-intent retrieval task, where the user's query should dominate the result set. Diversity may be useful in some broad searches, but it is not a required quality criterion for this evaluation.
+
+\section{Paper-Level Scoring}
+
+\subsection{Query Search Paper Score}
+
+For Query Search, the LLM judge scores each paper using three fields:
+
+\begin{align*}
+q_i &\in \{0,1,2\} && \text{query relevance}, \\
+u_i &\in \{0,1,2\} && \text{user-interest relevance}, \\
+s_i &\in \{0,1,2\} && \text{usefulness}.
+\end{align*}
+
+The final paper-level score for normal Query Search evaluation is:
+
+\[
+r_i^{\text{query}} =
+0.60 q_i + 0.30 u_i + 0.10 s_i.
+\]
+
+This weighting reflects that explicit query intent should dominate, while user-profile personalization and usefulness still contribute.
+
+\subsection{Daily Feed Paper Score}
+
+For Daily Feed, there is no explicit query. The LLM judge scores each paper using:
+
+\begin{align*}
+u_i &\in \{0,1,2\} && \text{user-interest relevance}, \\
+s_i &\in \{0,1,2\} && \text{usefulness}, \\
+f_i &\in \{0,1,2\} && \text{freshness or timeliness}.
+\end{align*}
+
+The final paper-level score for Daily Feed is:
+
+\[
+r_i^{\text{feed}} =
+0.70 u_i + 0.20 s_i + 0.10 f_i.
+\]
+
+This weighting reflects that the Daily Feed's primary goal is to recommend papers matching the user's research interests, while also rewarding useful and timely papers.
+
+\subsection{Stress-Test Query Score}
+
+For query-profile mismatch stress tests, we additionally report a query-dominant diagnostic score:
+
+\[
+r_i^{\text{stress}} =
+0.85 q_i + 0.15 s_i.
+\]
+
+This score is not used for headline Query Search performance. It is used only to diagnose whether the search system respects explicit query intent when the user's profile and query are weakly related or unrelated.
+
+\section{Aggregate Metrics}
+
+Given a ranked list of $K=20$ papers with paper-level scores $r_1,\ldots,r_{20}$, where each $r_i \in [0,2]$, we define:
+
+\subsection{Strict Precision@20}
+
+\[
+\text{Strict Precision@20}
+=
+\frac{1}{20}\sum_{i=1}^{20}
+\mathbb{I}[r_i \geq 1.5].
+\]
+
+This measures the fraction of returned papers that are strongly relevant.
+
+\subsection{Soft Precision@20}
+
+\[
+\text{Soft Precision@20}
+=
+\frac{1}{20}\sum_{i=1}^{20}
+\mathbb{I}[r_i \geq 0.8].
+\]
+
+This measures the fraction of returned papers that are at least acceptable.
+
+\subsection{Mean Relevance@20}
+
+\[
+\text{Mean Relevance@20}
+=
+\frac{1}{20}\sum_{i=1}^{20}\frac{r_i}{2}.
+\]
+
+This normalizes the average paper score to the range $[0,1]$.
+
+\subsection{NDCG@20}
+
+We compute graded ranking quality using Discounted Cumulative Gain:
+
+\[
+\text{DCG@20}
+=
+\sum_{i=1}^{20}
+\frac{2^{r_i}-1}{\log_2(i+1)}.
+\]
+
+Let $\text{IDCG@20}$ be the maximum possible DCG@20 obtained by sorting the same 20 papers in descending order of relevance score. Then:
+
+\[
+\text{NDCG@20}
+=
+\frac{\text{DCG@20}}{\text{IDCG@20}}.
+\]
+
+If all relevance scores are zero, NDCG@20 is defined as zero.
+
+\section{Daily Feed Diversity Metrics}
+
+Because the Daily Feed algorithm explicitly contains a diversity index $\delta$, diversity must be evaluated directly.
+
+\subsection{Thread Coverage@20}
+
+Assume a user has $k_u$ inferred research threads represented by centroids:
+
+\[
+c_1, c_2, \ldots, c_{k_u}.
+\]
+
+Each recommended paper is assigned to its nearest user thread:
+
+\[
+t_i = \arg\max_j \ e_i^\top c_j,
+\]
+
+where $e_i$ is the paper embedding.
+
+A thread is counted as covered if at least one relevant paper assigned to that thread appears in the top 20. We use a relevance threshold $\tau = 1.0$.
+
+\[
+\text{Thread Coverage@20}
+=
+\frac{
+\left|
+\left\{
+j :
+\exists i \leq 20
+\text{ such that }
+t_i = j
+\text{ and }
+r_i^{\text{feed}} \geq \tau
+\right\}
+\right|
+}{
+k_u
+}.
+\]
+
+If $k_u=1$, Thread Coverage@20 is trivially 1 when at least one relevant paper is returned, and should be interpreted with caution. This metric is most meaningful for users with $k_u=2$ or $k_u=3$.
+
+\subsection{Redundancy@20}
+
+Redundancy measures whether the feed contains many near-duplicate recommendations. Using paper embeddings $e_1,\ldots,e_{20}$, define:
+
+\[
+\text{Redundancy@20}
+=
+\frac{2}{20(20-1)}
+\sum_{1 \leq i < j \leq 20}
+e_i^\top e_j.
+\]
+
+Higher values indicate a more repetitive feed. Lower values indicate broader semantic spread.
+
+\subsection{Diversity Alignment}
+
+Diversity Alignment is a diagnostic for whether changing the diversity index $\delta$ produces the intended behavior.
+
+We evaluate the Daily Feed at:
+
+\[
+\delta \in \{0.0, 0.5, 1.0\}.
+\]
+
+The expected pattern is:
+
+\begin{itemize}[leftmargin=*]
+    \item Thread Coverage@20 should increase as $\delta$ increases.
+    \item Redundancy@20 should decrease as $\delta$ increases.
+    \item Mean Relevance@20 should remain reasonably stable, or decrease only mildly.
+\end{itemize}
+
+The diversity index is considered behaviorally valid if it improves coverage and reduces redundancy without causing a large drop in relevance.
+
+\section{Query Search Evaluation Design}
+
+Query Search is evaluated using two separate benchmarks:
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Expected-use benchmark}: the query is related to the user's profile and usually refines one of the user's interests.
+    \item \textbf{Stress-test benchmark}: the query is novel, interdisciplinary, or weakly related to the user's profile.
+\end{enumerate}
+
+Headline performance claims should be based on the expected-use benchmark. Stress-test results should be reported separately as a robustness and failure-mode analysis.
+
+\subsection{Query Search Baseline}
+
+The main baseline for Query Search is:
+
+\[
+\textbf{Query-only retrieval}.
+\]
+
+This baseline ranks papers using query-paper similarity without incorporating the user's profile. It tests whether adding user-profile personalization improves ranking quality over explicit query matching alone.
+
+The current algorithm is compared against:
+
+\[
+\textbf{Query + user profile + reranking}.
+\]
+
+The main comparison metrics are:
+
+\begin{itemize}[leftmargin=*]
+    \item NDCG@20
+    \item Mean Relevance@20
+    \item Strict Precision@20
+\end{itemize}
+
+\subsection{Expected-Use Query Search Test Cases}
+
+The following cases represent realistic personalized search behavior, where the query refines or specializes the user's research interests.
+
+\begin{longtable}{p{0.35\linewidth} p{0.55\linewidth}}
+\toprule
+\textbf{User Profile} & \textbf{Search Query} \\
+\midrule
+Healthcare AI; Medical Imaging & diffusion models for medical image segmentation \\
+Computational Biology; Machine Learning & single-cell perturbation modeling \\
+Climate \& Weather; Scientific Machine Learning & neural operators for weather forecasting \\
+NLP/LLMs; Information Retrieval & retrieval augmented generation for scientific question answering \\
+Robotics; Reinforcement Learning & reinforcement learning for robot navigation \\
+Computer Vision; Medical Imaging & self-supervised learning for medical image segmentation \\
+Scientific Machine Learning; Numerical Methods & physics-informed neural networks for PDE surrogate modeling \\
+Security \& Privacy; Federated Learning & privacy-preserving machine learning for healthcare data \\
+Computational Neuroscience; Representation Learning & representation learning in visual cortex \\
+Broad Machine Learning; Statistics & uncertainty estimation in deep learning \\
+\bottomrule
+\end{longtable}
+
+\subsection{Stress-Test Query Search Cases}
+
+These cases intentionally include weak or unusual alignment between the user profile and the query. They test whether the system respects the explicit query even when the query is outside the user's usual interests.
+
+\begin{longtable}{p{0.35\linewidth} p{0.55\linewidth}}
+\toprule
+\textbf{User Profile} & \textbf{Search Query} \\
+\midrule
+Robotics; Reinforcement Learning & protein language models for enzyme design \\
+Healthcare AI; Medical Imaging & transformer models for theorem proving \\
+Computational Biology; Genomics & neural radiance fields for robotics simulation \\
+Climate \& Weather; Scientific Machine Learning & mechanistic interpretability of large language models \\
+NLP/LLMs; Information Retrieval & graph neural networks for molecular property prediction \\
+Economics AI; Time Series Forecasting & diffusion models for protein structure generation \\
+\bottomrule
+\end{longtable}
+
+For stress-test cases, we report:
+
+\begin{itemize}[leftmargin=*]
+    \item Query-dominant Mean Relevance@20 using $r_i^{\text{stress}}$
+    \item Query-dominant NDCG@20
+    \item Qualitative failure modes
+\end{itemize}
+
+A useful optional diagnostic is \textbf{Profile Override Rate}: the fraction of top-20 papers that are related to the user profile but not relevant to the query. Lower is better for query-profile mismatch cases.
+
+\section{Daily Feed Evaluation Design}
+
+Daily Feed evaluation must test both the user embedding initialization and the feed-serving algorithm, because the recommendation process depends on the initialized user profile.
+
+We compare three variants.
+
+\subsection{Daily Feed Variants}
+
+\subsubsection*{Variant A: Single-Vector Average Baseline}
+
+This is the naive user embedding baseline.
+
+\begin{enumerate}[leftmargin=*]
+    \item Collect all onboarding seed vectors.
+    \item Average them into a single vector.
+    \item Normalize the result.
+    \item Retrieve and rank papers using cosine similarity to this single vector, optionally with the same recency bonus.
+\end{enumerate}
+
+This baseline tests whether multi-centroid user profile initialization improves over collapsing all interests into one averaged vector.
+
+\subsubsection*{Variant B: Multi-Centroid Profile Without Diversity Filter}
+
+This variant uses the custom user initialization algorithm, including threshold-based thread inference, but disables the explicit diversity filtering behavior.
+
+\begin{enumerate}[leftmargin=*]
+    \item Initialize the user with the current multi-centroid algorithm.
+    \item Retrieve candidate papers using max similarity over user centroids.
+    \item Rank by similarity and recency.
+    \item Do not enforce thread coverage or diversity-index behavior.
+\end{enumerate}
+
+This baseline isolates the effect of the multi-centroid representation while removing explicit diversity control.
+
+\subsubsection*{Variant C: Full Daily Feed Algorithm}
+
+This is the current algorithm.
+
+\begin{enumerate}[leftmargin=*]
+    \item Initialize the user with threshold-based multi-centroid thread inference.
+    \item Retrieve papers using max similarity over user centroids.
+    \item Apply recency-aware reranking.
+    \item Apply the diversity-index behavior, including thread coverage and redundancy control.
+\end{enumerate}
+
+This variant tests the combined effect of custom initialization and explicit diversity-aware feed serving.
+
+\subsection{Daily Feed Metrics}
+
+For all three variants, report:
+
+\begin{itemize}[leftmargin=*]
+    \item Strict Precision@20
+    \item Soft Precision@20
+    \item Mean Relevance@20
+    \item NDCG@20
+    \item Thread Coverage@20
+    \item Redundancy@20
+\end{itemize}
+
+The most important comparisons are:
+
+\begin{itemize}[leftmargin=*]
+    \item Variant A vs. Variant B: tests whether multi-centroid initialization improves over a single-vector profile.
+    \item Variant B vs. Variant C: tests whether explicit diversity control improves coverage and reduces redundancy.
+\end{itemize}
+
+\subsection{Daily Feed Test Profiles}
+
+The daily feed test profiles should include multi-interest users, because this is where multi-centroid initialization and diversity control are most meaningful.
+
+\begin{longtable}{p{0.9\linewidth}}
+\toprule
+\textbf{Daily Feed User Profiles} \\
+\midrule
+Healthcare AI; Computational Biology \\
+Climate \& Weather; Scientific Machine Learning \\
+NLP/LLMs; Information Retrieval \\
+Computer Vision; Medical Imaging \\
+Robotics; Reinforcement Learning \\
+Computational Neuroscience; Representation Learning \\
+Security \& Privacy; Federated Learning \\
+Economics AI; Time Series Forecasting \\
+Scientific Machine Learning; Numerical Methods \\
+Broad Machine Learning; AI for Education \\
+\bottomrule
+\end{longtable}
+
+For each user profile, the system returns a top-20 daily feed under each variant.
+
+\section{Diversity Index Sweep}
+
+To explicitly evaluate the Daily Feed diversity index, run the full Daily Feed algorithm with:
+
+\[
+\delta \in \{0.0, 0.5, 1.0\}.
+\]
+
+For each value of $\delta$, report:
+
+\begin{itemize}[leftmargin=*]
+    \item Mean Relevance@20
+    \item NDCG@20
+    \item Thread Coverage@20
+    \item Redundancy@20
+\end{itemize}
+
+The expected result is a tradeoff curve:
+
+\begin{itemize}[leftmargin=*]
+    \item Higher $\delta$ should increase Thread Coverage@20.
+    \item Higher $\delta$ should decrease Redundancy@20.
+    \item Mean Relevance@20 should remain acceptable.
+\end{itemize}
+
+This experiment directly validates whether the diversity index behaves as intended.
+
+\section{LLM Judge Prompts}
+
+\subsection{Query Search Judge Prompt}
+
+\begin{quote}
+You are evaluating a paper returned by a personalized academic search system.
+
+Given:
+\begin{enumerate}
+    \item the user's research profile,
+    \item the user's search query,
+    \item the candidate paper's title, abstract, categories, and date,
+\end{enumerate}
+
+assign scores:
+
+\textbf{query\_relevance}:
+\begin{itemize}
+    \item 2 = directly answers the query or is centrally about the requested topic
+    \item 1 = related to the query but not central
+    \item 0 = not relevant to the query
+\end{itemize}
+
+\textbf{user\_interest\_relevance}:
+\begin{itemize}
+    \item 2 = strongly matches one of the user's research interests
+    \item 1 = adjacent or partially related
+    \item 0 = unrelated to the user's interests
+\end{itemize}
+
+\textbf{usefulness}:
+\begin{itemize}
+    \item 2 = likely worth reading for this user; specific, technical, and useful
+    \item 1 = somewhat useful but generic, incremental, or peripheral
+    \item 0 = not useful
+\end{itemize}
+
+Return JSON only:
+
+\begin{verbatim}
+{
+  "query_relevance": 0|1|2,
+  "user_interest_relevance": 0|1|2,
+  "usefulness": 0|1|2,
+  "matched_user_thread": "...",
+  "reason": "..."
+}
+\end{verbatim}
+\end{quote}
+
+\subsection{Daily Feed Judge Prompt}
+
+\begin{quote}
+You are evaluating a paper returned by a personalized daily academic feed.
+
+There is no explicit search query. Judge whether this paper is a good daily recommendation for the user.
+
+Given:
+\begin{enumerate}
+    \item the user's research profile,
+    \item the user's inferred research threads,
+    \item the candidate paper's title, abstract, categories, and date,
+\end{enumerate}
+
+assign scores:
+
+\textbf{user\_interest\_relevance}:
+\begin{itemize}
+    \item 2 = strongly matches one of the user's research interests or inferred research threads
+    \item 1 = adjacent, broadly related, or potentially useful
+    \item 0 = unrelated to the user's interests
+\end{itemize}
+
+\textbf{usefulness}:
+\begin{itemize}
+    \item 2 = likely worth reading; specific, technical, and useful for the user's research
+    \item 1 = somewhat useful but generic, incremental, or peripheral
+    \item 0 = not useful
+\end{itemize}
+
+\textbf{freshness\_or\_timeliness}:
+\begin{itemize}
+    \item 2 = recent, timely, or especially relevant to current research directions
+    \item 1 = not very recent but still active/relevant
+    \item 0 = stale or not timely unless historically important
+\end{itemize}
+
+Return JSON only:
+
+\begin{verbatim}
+{
+  "user_interest_relevance": 0|1|2,
+  "usefulness": 0|1|2,
+  "freshness_or_timeliness": 0|1|2,
+  "matched_user_thread": "...",
+  "reason": "..."
+}
+\end{verbatim}
+\end{quote}
+
+\section{Recommended Plots and Tables}
+
+The following outputs are recommended for presentation slides.
+
+\subsection{Headline Metrics Table}
+
+Report final metrics for Query Search and Daily Feed at $K=20$.
+
+\begin{center}
+\begin{tabular}{lcccccc}
+\toprule
+\textbf{Algorithm} & \textbf{Strict P@20} & \textbf{Soft P@20} & \textbf{Mean Rel@20} & \textbf{NDCG@20} & \textbf{Coverage@20} & \textbf{Redundancy@20} \\
+\midrule
+Query Search & -- & -- & -- & -- & N/A & N/A \\
+Daily Feed & -- & -- & -- & -- & -- & -- \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Query Search Baseline Comparison}
+
+Plot Query-only retrieval versus the current Query Search algorithm.
+
+Recommended plot:
+
+\[
+\text{x-axis: algorithm variant}, \qquad
+\text{y-axis: NDCG@20}.
+\]
+
+\subsection{Daily Feed Variant Comparison}
+
+Plot the three Daily Feed variants:
+
+\begin{enumerate}[leftmargin=*]
+    \item Single-vector average baseline
+    \item Multi-centroid without diversity
+    \item Full Daily Feed
+\end{enumerate}
+
+Recommended metrics to plot:
+
+\begin{itemize}[leftmargin=*]
+    \item Thread Coverage@20
+    \item Mean Relevance@20
+    \item Redundancy@20
+\end{itemize}
+
+\subsection{Diversity Index Sweep}
+
+Plot:
+
+\[
+\delta \in \{0.0, 0.5, 1.0\}
+\]
+
+against:
+
+\begin{itemize}[leftmargin=*]
+    \item Thread Coverage@20
+    \item Mean Relevance@20
+    \item Redundancy@20
+\end{itemize}
+
+This plot should show whether higher diversity increases coverage and reduces redundancy while preserving relevance.
+
+\subsection{Relevance-by-Rank Curve}
+
+For each rank position $i=1,\ldots,20$, compute the average paper-level score across evaluation cases:
+
+\[
+\bar{r}_i =
+\frac{1}{N}
+\sum_{n=1}^{N}
+r_{n,i}.
+\]
+
+Plot:
+
+\[
+\text{x-axis: rank position } 1,\ldots,20,
+\qquad
+\text{y-axis: average paper score}.
+\]
+
+This visualizes whether the system ranks better papers earlier.
+
+\section{Reporting the Final Conclusion}
+
+The final evaluation conclusion should distinguish between performance measurement, baseline comparison, and robustness testing.
+
+A recommended conclusion format is:
+
+\begin{quote}
+We evaluated both algorithms at $K=20$ using an LLM-as-judge rubric with task-specific paper-level scores. Query Search was evaluated on expected-use cases and separately on stress-test cases. Daily Feed was evaluated using relevance, ranking quality, thread coverage, redundancy, and explicit diversity-index behavior.
+
+On expected-use cases, Query Search is compared against a query-only baseline to test whether user-profile personalization improves ranking. For Daily Feed, we compare a single-vector user profile baseline, a multi-centroid profile without diversity filtering, and the full diversity-aware algorithm. This separates the contribution of custom user initialization from the contribution of explicit diversity control.
+
+The main performance claims should be based on the expected-use Query Search benchmark and the standard Daily Feed benchmark. Stress-test Query Search cases are reported separately as robustness and failure-mode analysis.
+\end{quote}
+
+\section{Practical Time-Constrained Version}
+
+If time is limited, the recommended minimum evaluation is:
+
+\begin{enumerate}[leftmargin=*]
+    \item Run 8--10 expected-use Query Search cases.
+    \item Run 6 stress-test Query Search cases.
+    \item Run 8--10 Daily Feed profiles.
+    \item Compare Query Search against query-only retrieval.
+    \item Compare Daily Feed across the three variants:
+    \begin{enumerate}
+        \item single-vector average baseline,
+        \item multi-centroid without diversity,
+        \item full daily feed.
+    \end{enumerate}
+    \item Sweep Daily Feed diversity index over $\delta \in \{0.0,0.5,1.0\}$.
+\end{enumerate}
+
+This produces enough evidence for a rigorous presentation while remaining feasible under short time constraints.
+
+\end{document}
