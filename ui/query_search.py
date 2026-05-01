@@ -156,9 +156,9 @@ def render_query_search(index: PaperIndex) -> bool:
 
         paper_card(
             meta,
-            on_like=partial(_handle_search_feedback, "like", index),
-            on_save=partial(_handle_search_feedback, "save", index),
-            on_skip=partial(_handle_search_feedback, "skip", index),
+            on_like=partial(_handle_search_feedback, signal="like", index=index),
+            on_save=partial(_handle_search_feedback, signal="save", index=index),
+            on_skip=partial(_handle_search_feedback, signal="skip", index=index),
             liked=arxiv_id in liked,
             saved=arxiv_id in saved,
             skipped=arxiv_id in skipped,
