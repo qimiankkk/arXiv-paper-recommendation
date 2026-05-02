@@ -80,6 +80,7 @@ The app expects these generated files in `data/`:
 Generated artifacts are intentionally ignored by git. Keep only `data/.gitkeep` tracked.
 
 ## Setup
+Running our system requires Python 3.10 or higher
 
 Install dependencies:
 
@@ -98,6 +99,9 @@ OPENAI_CONNECTION_MODEL = "gpt-5.4-mini"
 The app can still run without an API key, but Workspace summary and connection generation will be unavailable.
 
 ## Build The Paper Index
+
+
+The following command generates Paper Index offline through embedding, which takes a long time. We have a pre-built data file here:https://drive.google.com/file/d/1X33gu6E2TcLCytLG-XsLSivhJge89-y9/view?usp=sharing. Please download and decompress it, then directly overwrite the data directory to avoid running the time-consuming command below.
 
 Run a development-sized offline pipeline:
 
