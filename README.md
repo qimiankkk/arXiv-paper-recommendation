@@ -14,7 +14,7 @@ The complete algorithm description and evaluation details can be found in `arXiv
    - Seeds are grouped into 1-3 user research-thread centroids with `user.profile.init_user_profile_v2`.
 
 2. Daily Feed
-   - `recommender.engine.recommend` selects nearby clusters, retrieves candidate papers, applies recency scoring, enforces a per-cluster cap, and returns up to 20 papers.
+   - `recommender.engine.recommend` selects nearby clusters, retrieves candidate papers, applies recency scoring, enforces a per-cluster cap, and returns 20 papers.
    - Like, Save, and Skip feedback is logged to SQLite and updates the nearest user centroid with an EMA rule.
    - Served papers are marked seen so future feeds avoid repeats.
 
@@ -25,14 +25,12 @@ The complete algorithm description and evaluation details can be found in `arXiv
 4. Workspace
    - Saved papers appear in the right-side Folders panel.
    - Papers can be added to the Workspace for synthesis, similar-paper discovery, and concept-map visualization.
-   - Workspace summaries and graph connections are cached under `data/workspace_cache/`.
 
 5. Research Lab
    - Opens a saved or selected paper PDF, supports clipping snippets, and stores research notes in SQLite.
-   - Notes remain part of Research Lab, not the Folders sidebar.
 
 6. Profile
-   - Shows account metadata, feedback counts, preferences, and optional embedding-space visualization when diagnostic artifacts are available.
+   - Shows account metadata, feedback counts, preferences, and embedding-space visualization.
 
 ## Embedding Visualization
 
@@ -43,8 +41,6 @@ Folio can project the paper index into a 2D UMAP view and overlay user centroids
 ## Optional AI Implementation
 
 Workspace AI is optional. When an OpenAI API key is configured, saved workspace papers can be synthesized into a structured summary and a connection graph. Outputs are cached under `data/workspace_cache/` so repeated views do not regenerate the same analysis.
-
-![AI workspace summary](docs/media/ai-workspace-summary.png)
 
 ![AI connections graph](docs/media/ai-connections-graph.png)
 
